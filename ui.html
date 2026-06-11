@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lyrics Slides</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --panel: #181c26;
+    --panel2: #1f2433;
+    --border: #2a3042;
+    --text: #e8eaf0;
+    --muted: #8b93a7;
+    --accent: #7c6cf6;
+    --accent-hover: #9183ff;
+    --good: #3ecf8e;
+    --bad: #ff6b6b;
+    --warn: #ffb454;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 15px; line-height: 1.45;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 80px; }
+  header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 22px; }
+  header h1 { font-size: 26px; margin: 0; letter-spacing: -0.02em; }
+  header .sub { color: var(--muted); font-size: 14px; }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 14px; padding: 18px; margin-bottom: 14px;
+  }
+  .card h2 { margin: 0 0 12px; font-size: 15px; color: var(--muted);
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
+
+  .song-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .song-head .num { font-weight: 700; font-size: 16px; }
+  .song-status { font-size: 13px; }
+  .song-status.ok { color: var(--good); }
+  .song-status.err { color: var(--bad); }
+  .song-status.busy { color: var(--warn); }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .full { grid-column: 1 / -1; }
+  label.fld { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 4px; }
+  input[type=text], textarea, select {
+    width: 100%; background: var(--panel2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 9px;
+    padding: 9px 12px; font-size: 14.5px; font-family: inherit; outline: none;
+    transition: border-color .15s;
+  }
+  input[type=text]:focus, textarea:focus { border-color: var(--accent); }
+  .or { text-align: center; color: var(--muted); font-size: 12px; margin: 8px 0 6px;
+        display: flex; align-items: center; gap: 10px; }
+  .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
+
+  .bg-strip { display: flex; gap: 8px; overflow-x: auto; padding: 6px 2px 8px; }
+  .bg-opt {
+    flex: 0 0 auto; width: 92px; cursor: pointer; border: 2px solid transparent;
+    border-radius: 10px; padding: 4px; text-align: center; background: var(--panel2);
+    transition: border-color .12s, transform .12s;
+  }
+  .bg-opt:hover { transform: translateY(-1px); }
+  .bg-opt.sel { border-color: var(--accent); }
+  .bg-opt img { width: 100%; height: 48px; object-fit: cover; border-radius: 6px; display: block; }
+  .bg-opt .rand { width: 100%; height: 48px; display: flex; align-items: center;
+    justify-content: center; font-size: 24px; background: var(--bg); border-radius: 6px; }
+  .bg-opt .nm { font-size: 10.5px; color: var(--muted); margin-top: 4px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .row-btns { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: center; }
+  button {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 9px; padding: 8px 16px; font-size: 14px; cursor: pointer;
+    font-family: inherit; transition: background .15s, border-color .15s;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover { background: var(--accent-hover); }
+  button.danger:hover { border-color: var(--bad); color: var(--bad); }
+  button:disabled { opacity: .45; cursor: default; }
+  .lyr-badge { font-size: 12.5px; color: var(--good); }
+  a.dlbtn {
+    display: inline-block; background: var(--good); color: #0b2417;
+    border-radius: 9px; padding: 8px 16px; font-size: 14px; font-weight: 600;
+    text-decoration: none;
+  }
+  a.dlbtn:hover { filter: brightness(1.1); }
+
+  .bigbar { display: flex; gap: 10px; align-items: center; margin-top: 18px; }
+  .bigbar button.primary { padding: 12px 28px; font-size: 16px; border-radius: 11px; }
+
+  /* backgrounds manager */
+  .mgr-row { display: flex; align-items: center; gap: 12px; padding: 7px 4px;
+    border-bottom: 1px solid var(--border); }
+  .mgr-row:last-child { border-bottom: none; }
+  .mgr-row img { width: 76px; height: 42px; object-fit: cover; border-radius: 6px; }
+  .mgr-row .nm { flex: 1; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; }
+  .mgr-row select { width: 92px; padding: 5px 8px; font-size: 13px; }
+  .switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .tr { position: absolute; inset: 0; background: var(--border); border-radius: 22px;
+    cursor: pointer; transition: background .15s; }
+  .switch .tr::before { content: ""; position: absolute; width: 16px; height: 16px; left: 3px;
+    top: 3px; background: #fff; border-radius: 50%; transition: transform .15s; }
+  .switch input:checked + .tr { background: var(--accent); }
+  .switch input:checked + .tr::before { transform: translateX(16px); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 14px; user-select: none; }
+  details[open] summary { margin-bottom: 8px; }
+  .hint { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+
+  /* modal */
+  .overlay { position: fixed; inset: 0; background: rgba(5,7,12,.72); display: none;
+    align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  .overlay.show { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 16px;
+    width: 640px; max-width: 100%; max-height: 90vh; display: flex; flex-direction: column;
+    padding: 20px; }
+  .modal h3 { margin: 0 0 4px; }
+  .modal .src { color: var(--muted); font-size: 13px; margin-bottom: 12px; }
+  .modal textarea { flex: 1; min-height: 320px; resize: vertical; font-size: 14px;
+    line-height: 1.5; white-space: pre; }
+  .modal .mrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
+  .modal .mbtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+
+  .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
+    background: var(--panel2); border: 1px solid var(--border); padding: 10px 20px;
+    border-radius: 10px; font-size: 14px; display: none; z-index: 60; }
+  .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--warn);
+    border-top-color: transparent; border-radius: 50%; animation: sp .7s linear infinite;
+    vertical-align: -2px; margin-right: 5px; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>&#127925; Lyrics Slides</h1>
+    <span class="sub">Artist + title, or paste a Genius / AZLyrics link</span>
+  </header>
+
+  <div id="fileWarn" style="display:none" class="card">
+    <span style="color:var(--bad); font-weight:600">This page was opened as a file, so nothing will work.</span>
+    <div class="hint">Open the app's web address instead.</div>
+  </div>
+
+  <div class="card" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+    <label style="font-weight:600">How many songs?</label>
+    <input type="number" id="songCount" min="1" max="50" value="1"
+           style="width:80px; text-align:center"
+           onchange="setSongCount(this.value)" onkeydown="if(event.key==='Enter')setSongCount(this.value)">
+    <span class="hint">Rows update as you change the number - filled-in songs are kept.</span>
+  </div>
+
+  <div id="songs"></div>
+
+  <div class="card">
+    <details id="mgrDetails">
+      <summary>Manage backgrounds (random pool, text color, add images)</summary>
+      <div id="mgrList"></div>
+      <div class="row-btns">
+        <button onclick="document.getElementById('upl').click()">+ Add image&hellip;</button>
+        <input type="file" id="upl" accept=".png,.jpg,.jpeg" style="display:none" onchange="uploadBg(this)">
+        <span class="hint">Toggled-on images form the pool used when a song's background is "Random".
+        Text color is normally picked automatically; override it per image here. A contrast shadow +
+        outline is always added so lyrics stay readable.</span>
+      </div>
+    </details>
+  </div>
+
+  <div class="bigbar">
+    <button class="primary" id="createBtn" onclick="createAll()">Create PowerPoints</button>
+    <span id="globalStatus" class="hint"></span>
+  </div>
+</div>
+
+<!-- lyrics preview / edit modal -->
+<div class="overlay" id="ov">
+  <div class="modal">
+    <h3 id="mTitle">Lyrics</h3>
+    <div class="src" id="mSrc"></div>
+    <div class="mrow">
+      <div><label class="fld">Song title</label><input type="text" id="mSongTitle"></div>
+      <div><label class="fld">Artist</label><input type="text" id="mArtist"></div>
+    </div>
+    <textarea id="mLyrics" spellcheck="false" placeholder="Paste or edit lyrics here. Blank lines separate verses; [Chorus]-style markers are ignored."></textarea>
+    <div class="mbtns">
+      <button onclick="closeModal()">Cancel</button>
+      <button class="primary" onclick="saveModal()">Use these lyrics</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+let songs = [];          // {artist,title,url,lyrics,source,bg,status,statusCls}
+let backgrounds = [];    // {name,color_mode,selected}
+let modalIdx = -1;
+
+const $ = id => document.getElementById(id);
+
+function toast(msg) {
+  const t = $('toast'); t.textContent = msg; t.style.display = 'block';
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3200);
+}
+
+async function api(path, body) {
+  const opts = body ? {method:'POST', headers:{'Content-Type':'application/json'},
+                       body: JSON.stringify(body)} : {};
+  const r = await fetch(path, opts);
+  return r.json();
+}
+
+function newSong() {
+  return {artist:'', title:'', url:'', lyrics:'', source:'', bg:'random',
+          status:'', statusCls:''};
+}
+
+function setSongCount(n) {
+  n = Math.max(1, Math.min(50, parseInt(n, 10) || 1));
+  $('songCount').value = n;
+  while (songs.length < n) songs.push(newSong());
+  if (songs.length > n) songs.length = n;   // trims from the bottom
+  render();
+}
+
+function removeSong(i) {
+  songs.splice(i, 1);
+  if (!songs.length) songs.push(newSong());
+  $('songCount').value = songs.length;
+  render();
+}
+
+function esc(s) {
+  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function bgStrip(i) {
+  const s = songs[i];
+  let h = `<div class="bg-opt ${s.bg==='random'?'sel':''}" onclick="pickBg(${i},'random')">
+             <div class="rand">&#127922;</div><div class="nm">Random</div></div>`;
+  for (const b of backgrounds) {
+    h += `<div class="bg-opt ${s.bg===b.name?'sel':''}" onclick="pickBg(${i},'${esc(b.name)}')">
+            <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
+            <div class="nm" title="${esc(b.name)}">${esc(b.name)}</div></div>`;
+  }
+  return h;
+}
+
+function pickBg(i, name) { songs[i].bg = name; render(); }
+
+function render() {
+  const host = $('songs');
+  host.innerHTML = songs.map((s, i) => `
+    <div class="card">
+      <div class="song-head">
+        <span class="num">Song ${i + 1}</span>
+        <span class="song-status ${s.statusCls}">${s.status}</span>
+      </div>
+      <div class="grid2">
+        <div><label class="fld">Artist</label>
+          <input type="text" value="${esc(s.artist)}" oninput="songs[${i}].artist=this.value"></div>
+        <div><label class="fld">Song title</label>
+          <input type="text" value="${esc(s.title)}" oninput="songs[${i}].title=this.value"></div>
+        <div class="full">
+          <div class="or">or paste a link</div>
+          <input type="text" placeholder="https://genius.com/...  or  https://www.azlyrics.com/..."
+                 value="${esc(s.url)}" oninput="songs[${i}].url=this.value">
+        </div>
+        <div class="full">
+          <label class="fld">Background for this song</label>
+          <div class="bg-strip">${bgStrip(i)}</div>
+        </div>
+      </div>
+      <div class="row-btns">
+        <button onclick="previewLyrics(${i})">&#128269; Preview / edit lyrics</button>
+        ${s.lyrics ? `<span class="lyr-badge">&#10003; Lyrics ready${s.source ? ' (' + esc(s.source) + ')' : ''}</span>
+                      <button onclick="clearLyrics(${i})">Clear</button>` : ''}
+        ${s.downloadUrl ? `<a class="dlbtn" href="${esc(s.downloadUrl)}" download="${esc(s.file)}">&#11015;&#65039; Download ${esc(s.file)}</a>` : ''}
+        ${songs.length > 1 ? `<button class="danger" style="margin-left:auto" onclick="removeSong(${i})">Remove</button>` : ''}
+      </div>
+    </div>`).join('');
+}
+
+function setStatus(i, msg, cls) { songs[i].status = msg; songs[i].statusCls = cls || ''; render(); }
+
+function hasInput(s) { return (s.artist.trim() && s.title.trim()) || s.url.trim() || s.lyrics.trim(); }
+
+/* ---------- lyrics preview / manual paste ---------- */
+async function previewLyrics(i) {
+  const s = songs[i];
+  modalIdx = i;
+  $('mSongTitle').value = s.title;
+  $('mArtist').value = s.artist;
+  $('mLyrics').value = s.lyrics;
+  $('mSrc').textContent = s.lyrics ? `Currently saved${s.source ? ' from ' + s.source : ''}` : '';
+  $('ov').classList.add('show');
+
+  if (!s.lyrics && (s.url.trim() || (s.artist.trim() && s.title.trim()))) {
+    $('mSrc').innerHTML = '<span class="spin"></span>Fetching lyrics&hellip;';
+    const r = await api('/api/preview', {artist: s.artist, title: s.title, url: s.url});
+    if (modalIdx !== i) return;
+    if (r.ok) {
+      $('mLyrics').value = r.lyrics;
+      if (!$('mSongTitle').value) $('mSongTitle').value = r.title;
+      if (!$('mArtist').value) $('mArtist').value = r.artist;
+      $('mSrc').textContent = 'Fetched from ' + r.source + ' - check and edit freely.';
+      songs[i]._fetchedSource = r.source;
+    } else {
+      $('mSrc').textContent = (r.error || 'Lyrics not found.') + ' You can paste them manually below.';
+    }
+  } else if (!s.lyrics) {
+    $('mSrc').textContent = 'Enter artist + title or a link first, or just paste lyrics below.';
+  }
+}
+
+function closeModal() { modalIdx = -1; $('ov').classList.remove('show'); }
+
+function saveModal() {
+  if (modalIdx < 0) return;
+  const s = songs[modalIdx];
+  s.title = $('mSongTitle').value.trim();
+  s.artist = $('mArtist').value.trim();
+  s.lyrics = $('mLyrics').value;
+  if (s.lyrics.trim()) {
+    s.source = s._fetchedSource ? s._fetchedSource + ', edited' : 'Manual paste';
+    setStatus(modalIdx, 'Lyrics ready', 'ok');
+  } else {
+    s.lyrics = ''; s.source = '';
+  }
+  closeModal(); render();
+}
+
+function clearLyrics(i) { songs[i].lyrics=''; songs[i].source=''; songs[i]._fetchedSource=''; setStatus(i,'',''); }
+
+/* ---------- create ---------- */
+async function createAll() {
+  const todo = songs.map((s, i) => [s, i]).filter(([s]) => hasInput(s));
+  if (!todo.length) { toast('Fill in at least one song first.'); return; }
+
+  await saveSettings();
+  $('createBtn').disabled = true;
+  let made = 0, failed = 0;
+
+  for (const [s, i] of todo) {
+    setStatus(i, 'Working...', 'busy');
+    $('globalStatus').textContent = `Creating ${made + failed + 1} of ${todo.length}...`;
+    try {
+      const r = await api('/api/create_one', {
+        artist: s.artist, title: s.title, url: s.url, lyrics: s.lyrics,
+        source: s.source, background: s.bg,
+      });
+      if (r.ok) {
+        made++;
+        s.downloadUrl = r.download;
+        s.file = r.file;
+        setStatus(i, 'Ready - tap Download below', 'ok');
+      }
+      else {
+        failed++;
+        setStatus(i, r.error || 'Failed', 'err');
+        if (r.needs_lyrics) toast(`Song ${i + 1}: not found - use "Preview / edit lyrics" to paste them manually.`);
+      }
+    } catch (e) { failed++; setStatus(i, 'Server error', 'err'); }
+  }
+
+  $('createBtn').disabled = false;
+  $('globalStatus').textContent = `Done - ${made} created${failed ? ', ' + failed + ' failed' : ''}.`;
+  toast(`Done: ${made} PowerPoint${made === 1 ? '' : 's'} ready${failed ? ', ' + failed + ' failed' : ''}. Tap the green Download buttons.`);
+}
+
+/* ---------- backgrounds manager ---------- */
+function renderMgr() {
+  $('mgrList').innerHTML = backgrounds.map((b, i) => `
+    <div class="mgr-row">
+      <label class="switch"><input type="checkbox" ${b.selected ? 'checked' : ''}
+        onchange="backgrounds[${i}].selected=this.checked; saveSettings()">
+        <span class="tr"></span></label>
+      <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
+      <span class="nm">${esc(b.name)}</span>
+      <select onchange="backgrounds[${i}].color_mode=this.value; saveSettings()">
+        ${['Auto','Black','White'].map(m =>
+          `<option ${b.color_mode === m ? 'selected' : ''}>${m}</option>`).join('')}
+      </select>
+    </div>`).join('') || '<div class="hint">No images yet - add one below.</div>';
+}
+
+async function saveSettings() {
+  const colors = {}, selected = {};
+  for (const b of backgrounds) { colors[b.name] = b.color_mode; selected[b.name] = b.selected; }
+  await api('/api/save_settings', {
+    background_colors: colors,
+    background_selected: selected,
+  });
+}
+
+function uploadBg(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const rd = new FileReader();
+  rd.onload = async () => {
+    const r = await api('/api/upload_background', {name: file.name, data: rd.result});
+    if (r.ok) { toast('Added ' + r.name); await loadBackgrounds(); render(); }
+    else toast(r.error || 'Upload failed');
+    input.value = '';
+  };
+  rd.readAsDataURL(file);
+}
+
+async function loadBackgrounds() {
+  const r = await api('/api/backgrounds');
+  if (r.ok) { backgrounds = r.backgrounds; renderMgr(); }
+}
+
+/* ---------- init ---------- */
+(async function init() {
+  songs.push(newSong());
+  if (location.protocol === 'file:') {
+    $('fileWarn').style.display = 'block';
+    render();
+    return;
+  }
+  try {
+    await loadBackgrounds();
+  } catch (e) {
+    $('fileWarn').style.display = 'block';
+  }
+  render();
+})();
+
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+</script>
+</body>
+</html>

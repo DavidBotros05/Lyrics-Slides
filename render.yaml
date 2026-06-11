@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: lyrics-slides
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    envVars:
+      - key: GENIUS_ACCESS_TOKEN
+        sync: false
