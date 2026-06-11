@@ -228,6 +228,7 @@
     </div>
     <textarea id="mLyrics" spellcheck="false" placeholder="Paste or edit lyrics here. Blank lines separate verses; [Chorus]-style markers are ignored."></textarea>
     <div class="mbtns">
+      <button id="mFetchBtn" onclick="fetchIntoModal()" style="margin-right:auto">&#128269; Fetch lyrics</button>
       <button onclick="closeModal()">Cancel</button>
       <button class="primary" onclick="saveModal()">Use these lyrics</button>
     </div>
@@ -351,7 +352,8 @@ function render() {
         </div>
       </div>
       <div class="row-btns">
-        <button onclick="previewLyrics(${i})">&#128269; Preview / edit lyrics</button>
+        <button onclick="openLyricsModal(${i})">${s.lyrics ? '&#9998; Edit lyrics' : '&#128221; Paste lyrics'}</button>
+        ${s.statusCls === 'err' ? `<button onclick="retrySong(${i})">&#8635; Retry</button>` : ''}
         ${s.lyrics ? `<span class="lyr-badge">&#10003; Lyrics ready${s.source ? ' (' + esc(s.source) + ')' : ''}</span>
                       <button onclick="clearLyrics(${i})">Clear</button>` : ''}
         ${s.downloadUrl ? `<a class="dlbtn" href="${esc(s.downloadUrl)}" download="${esc(s.file)}">&#11015;&#65039; Download ${esc(s.file)}</a>` : ''}
@@ -421,19 +423,33 @@ async function importSpotify() {
   $('spotifyBtn').disabled = false;
 }
 
-/* ---------- lyrics preview / manual paste ---------- */
-async function previewLyrics(i) {
+/* ---------- lyrics modal (manual paste first; fetch only on demand) ---------- */
+function openLyricsModal(i) {
   const s = songs[i];
   modalIdx = i;
   $('mSongTitle').value = s.title;
   $('mArtist').value = s.artist;
   $('mLyrics').value = s.lyrics;
-  $('mSrc').textContent = s.lyrics ? `Currently saved${s.source ? ' from ' + s.source : ''}` : '';
+  $('mSrc').textContent = s.lyrics
+      ? `Currently saved${s.source ? ' from ' + s.source : ''}`
+      : 'Paste the lyrics below, or press "Fetch lyrics" to look them up.';
   $('ov').classList.add('show');
+  $('mLyrics').focus();
+}
 
-  if (!s.lyrics && (s.url.trim() || (s.artist.trim() && s.title.trim()))) {
-    $('mSrc').innerHTML = '<span class="spin"></span>Fetching lyrics&hellip;';
-    const r = await api('/api/preview', {artist: s.artist, title: s.title, url: s.url});
+async function fetchIntoModal() {
+  if (modalIdx < 0) return;
+  const i = modalIdx, s = songs[i];
+  const title = $('mSongTitle').value.trim();
+  const artist = $('mArtist').value.trim();
+  if (!title && !artist && !s.url.trim()) {
+    $('mSrc').textContent = 'Enter a song title (or a link in the song row) first.';
+    return;
+  }
+  $('mFetchBtn').disabled = true;
+  $('mSrc').innerHTML = '<span class="spin"></span>Fetching lyrics&hellip;';
+  try {
+    const r = await api('/api/preview', {artist, title, url: s.url});
     if (modalIdx !== i) return;
     if (r.ok) {
       $('mLyrics').value = r.lyrics;
@@ -442,11 +458,12 @@ async function previewLyrics(i) {
       $('mSrc').textContent = 'Fetched from ' + r.source + ' - check and edit freely.';
       songs[i]._fetchedSource = r.source;
     } else {
-      $('mSrc').textContent = (r.error || 'Lyrics not found.') + ' You can paste them manually below.';
+      $('mSrc').textContent = (r.error || 'Lyrics not found.') + ' Paste them manually below.';
     }
-  } else if (!s.lyrics) {
-    $('mSrc').textContent = 'Enter artist + title or a link first, or just paste lyrics below.';
+  } catch (e) {
+    $('mSrc').textContent = 'Server error while fetching lyrics.';
   }
+  $('mFetchBtn').disabled = false;
 }
 
 function closeModal() { modalIdx = -1; $('ov').classList.remove('show'); }
@@ -479,6 +496,46 @@ function stopCreating() {
   if (currentFetchCtrl) currentFetchCtrl.abort();
 }
 
+async function createOne(s, i) {
+  setStatus(i, 'Working...', 'busy');
+  try {
+    currentFetchCtrl = new AbortController();
+    const r = await api('/api/create_one', {
+      artist: s.artist, title: s.title, url: s.url, lyrics: s.lyrics,
+      source: s.source, background: s.bg,
+    }, currentFetchCtrl.signal);
+    currentFetchCtrl = null;
+    if (r.ok) {
+      s.downloadUrl = r.download;
+      s.file = r.file;
+      setStatus(i, `Ready - tap Download below${r.source ? ' (lyrics from ' + r.source + ')' : ''}`, 'ok');
+      return 'ok';
+    }
+    setStatus(i, r.error || 'Failed', 'err');
+    if (r.needs_lyrics) toast(`Song ${i + 1}: not found - use "Paste lyrics" to add them manually.`);
+    return 'fail';
+  } catch (e) {
+    currentFetchCtrl = null;
+    if (stopRequested || e.name === 'AbortError') {
+      setStatus(i, 'Stopped', 'err');
+      return 'stopped';
+    }
+    setStatus(i, 'Server error', 'err');
+    return 'fail';
+  }
+}
+
+async function retrySong(i) {
+  if ($('createBtn').disabled) return;   // a batch is already running
+  if (!hasInput(songs[i])) { toast('Fill in the song first.'); return; }
+  stopRequested = false;
+  $('createBtn').disabled = true;
+  await saveSettings();
+  const res = await createOne(songs[i], i);
+  $('createBtn').disabled = false;
+  if (res !== 'ok') toast('Still failing - check the error on the song row.');
+}
+
 async function createAll() {
   const todo = songs.map((s, i) => [s, i]).filter(([s]) => hasInput(s));
   if (!todo.length) { toast('Fill in at least one song first.'); return; }
@@ -492,35 +549,13 @@ async function createAll() {
 
   for (const [s, i] of todo) {
     if (stopRequested) { skipped++; setStatus(i, 'Skipped (stopped)', ''); continue; }
-    setStatus(i, 'Working...', 'busy');
     $('globalStatus').textContent = `Creating ${made + failed + 1} of ${todo.length}...`;
-    try {
-      currentFetchCtrl = new AbortController();
-      const r = await api('/api/create_one', {
-        artist: s.artist, title: s.title, url: s.url, lyrics: s.lyrics,
-        source: s.source, background: s.bg,
-      }, currentFetchCtrl.signal);
-      if (r.ok) {
-        made++;
-        s.downloadUrl = r.download;
-        s.file = r.file;
-        setStatus(i, `Ready - tap Download below${r.source ? ' (lyrics from ' + r.source + ')' : ''}`, 'ok');
-      }
-      else {
-        failed++;
-        setStatus(i, r.error || 'Failed', 'err');
-        if (r.needs_lyrics) toast(`Song ${i + 1}: not found - use "Preview / edit lyrics" to paste them manually.`);
-      }
-    } catch (e) {
-      if (stopRequested || e.name === 'AbortError') {
-        skipped++;
-        setStatus(i, 'Stopped', 'err');
-      } else { failed++; setStatus(i, 'Server error', 'err'); }
-    }
-    currentFetchCtrl = null;
+    const res = await createOne(s, i);
+    if (res === 'ok') made++;
+    else if (res === 'stopped') skipped++;
+    else failed++;
   }
 
-  currentFetchCtrl = null;
   $('createBtn').disabled = false;
   $('stopBtn').style.display = 'none';
   const bits = [`${made} ready`];
