@@ -46,6 +46,22 @@ class AZLyricsBlockedError(RuntimeError):
     """Raised when AZLyrics returns its browser-check / captcha page."""
 
 
+class GeniusBlockedError(RuntimeError):
+    """Raised when Genius/Cloudflare returns its human-verification page."""
+
+
+GENIUS_BLOCKED_MSG = (
+    "Genius is asking for human verification, so the lyrics can't be fetched "
+    "from that link right now. Try searching by artist + title instead "
+    "(uses LRCLIB), or paste the lyrics manually.")
+
+
+def _short_err(exc: Exception, limit: int = 160) -> str:
+    """One tidy line from an exception, never a wall of page text/headers."""
+    msg = ' '.join(str(exc).split())
+    return (msg[:limit] + '...') if len(msg) > limit else (msg or type(exc).__name__)
+
+
 try:
     from azapi import AZlyrics
 except ImportError:
@@ -204,7 +220,7 @@ def fetch_from_azlyrics(artist: str = '', title: str = '', url: str = '') -> dic
             return None
         except Exception as exc:
             scraped = None
-            LAST_ERROR = f"Couldn't load the AZLyrics page ({exc})."
+            LAST_ERROR = f"Couldn't load the AZLyrics page ({_short_err(exc)})."
 
         if scraped and scraped['text'].strip():
             return {
@@ -221,7 +237,7 @@ def fetch_from_azlyrics(artist: str = '', title: str = '', url: str = '') -> dic
     try:
         lyrics = api.getLyrics(url=url, save=False) if url else api.getLyrics(save=False)
     except Exception as exc:
-        LAST_ERROR = f"AZLyrics lookup failed ({exc})."
+        LAST_ERROR = f"AZLyrics lookup failed ({_short_err(exc)})."
         return None
 
     # azapi returns the lyrics string on success, or an error code on failure.
@@ -250,6 +266,18 @@ def _scrape_genius_url(url: str) -> dict | None:
     _require_scraper_packages()
 
     resp = requests.get(url, headers=BROWSER_HEADERS, timeout=20)
+
+    # Cloudflare's "are you human?" challenge page — stop with a gentle
+    # message instead of letting the raw challenge HTML leak into errors.
+    body_start = (resp.text or '')[:3000].lower()
+    if (
+        resp.headers.get('Cf-Mitigated') == 'challenge'
+        or "make sure you're a human" in body_start
+        or 'checking your browser' in body_start
+        or 'just a moment' in body_start
+    ):
+        raise GeniusBlockedError(GENIUS_BLOCKED_MSG)
+
     resp.raise_for_status()
 
     soup = BeautifulSoup(resp.text, 'html.parser')
@@ -388,9 +416,14 @@ def fetch_from_genius(artist: str = '', title: str = '', url: str = '') -> dict 
         # 1) Direct scrape with a real browser User-Agent (most reliable).
         try:
             scraped = _scrape_genius_url(url)
+        except GeniusBlockedError as exc:
+            # Cloudflare wall: the lyricsgenius backup would hit it too and
+            # dump the raw challenge page into the error, so stop here.
+            LAST_ERROR = str(exc)
+            return None
         except Exception as exc:
             scraped = None
-            LAST_ERROR = f"Couldn't load the Genius page ({exc})."
+            LAST_ERROR = f"Couldn't load the Genius page ({_short_err(exc)})."
 
         if scraped and scraped['text'].strip():
             return {
@@ -415,7 +448,7 @@ def fetch_from_genius(artist: str = '', title: str = '', url: str = '') -> dict 
                         'source': 'Genius Lyrics',
                     }
             except Exception as exc:
-                LAST_ERROR = f"Couldn't read lyrics from the Genius page ({exc})."
+                LAST_ERROR = f"Couldn't read lyrics from the Genius page ({_short_err(exc)})."
 
         LAST_ERROR = LAST_ERROR or "That Genius page didn't contain any lyrics text."
         return None
@@ -433,7 +466,7 @@ def fetch_from_genius(artist: str = '', title: str = '', url: str = '') -> dict 
                         timeout=15, retries=2)
         song = genius.search_song(title, artist)
     except Exception as exc:
-        LAST_ERROR = f"Genius search failed ({exc})."
+        LAST_ERROR = f"Genius search failed ({_short_err(exc)})."
         return None
 
     if song is None or not getattr(song, 'lyrics', '').strip():
