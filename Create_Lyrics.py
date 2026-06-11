@@ -502,8 +502,20 @@ def fetch_song(artist: str = '', title: str = '',
     if _detect_source(gen) == 'azlyrics':
         az, gen = gen, ''
 
-    # A pasted link takes priority over searching. Try Genius first since
-    # its direct scrape is the most reliable.
+    # LRCLIB is the default/first source: a free open API with no token and
+    # no anti-bot wall. Search it with the typed artist/title, or — when only
+    # a link was pasted — with the words from the link's slug.
+    lr_artist, lr_title = artist, title
+    if not lr_title and (gen or az):
+        # A slug like "artist-song-lyrics" works well as a loose search, so
+        # leave the artist box empty to trigger LRCLIB's keyword search.
+        lr_artist, lr_title = '', _title_from_url(gen or az)
+    if lr_title:
+        song = fetch_from_lrclib(lr_artist, lr_title)
+        if song:
+            return song
+
+    # Fall back to scraping a pasted link directly.
     if gen:
         song = fetch_from_genius(artist, title, url=gen)
         if song:
@@ -513,12 +525,7 @@ def fetch_song(artist: str = '', title: str = '',
         if song:
             return song
 
-    # Fall back to searching by name. LRCLIB goes first: it's a free open API
-    # with no token and no Cloudflare anti-bot wall (unlike Genius/AZLyrics).
-    if title:
-        song = fetch_from_lrclib(artist, title)
-        if song:
-            return song
+    # Last resort: Genius/AZLyrics search by name (needs both fields).
     if artist and title:
         song = fetch_from_genius(artist, title) or fetch_from_azlyrics(artist, title)
         if song:
