@@ -205,6 +205,16 @@
     <button class="danger" id="stopBtn" style="display:none" onclick="stopCreating()">&#9632; Stop</button>
     <span id="globalStatus" class="hint"></span>
   </div>
+
+  <div class="card" id="dlAllBar" style="display:none; margin-top:14px">
+    <h2>Download everything</h2>
+    <div style="display:flex; gap:8px; flex-wrap:wrap">
+      <input type="text" id="dlAllName" placeholder="Name the file, e.g. Sunday Worship"
+             style="flex:1; min-width:180px" onkeydown="if(event.key==='Enter')downloadAll()">
+      <button class="primary" onclick="downloadAll()" id="dlAllBtn">&#11015;&#65039; Download all (.zip)</button>
+    </div>
+    <div class="hint" id="dlAllHint">All created PowerPoints in one zip file.</div>
+  </div>
 </div>
 
 <!-- lyrics preview / edit modal -->
@@ -348,9 +358,34 @@ function render() {
         ${songs.length > 1 ? `<button class="danger" style="margin-left:auto" onclick="removeSong(${i})">Remove</button>` : ''}
       </div>
     </div>`).join('');
+  updateDlAllBar();
 }
 
 function setStatus(i, msg, cls) { songs[i].status = msg; songs[i].statusCls = cls || ''; render(); }
+
+function updateDlAllBar() {
+  const ready = songs.filter(s => s.downloadUrl).length;
+  $('dlAllBar').style.display = ready ? '' : 'none';
+  if (ready) $('dlAllHint').textContent =
+    `${ready} PowerPoint${ready === 1 ? '' : 's'} ready - bundled into one zip file.`;
+}
+
+async function downloadAll() {
+  const tokens = songs.filter(s => s.downloadUrl)
+                      .map(s => s.downloadUrl.split('/').pop());
+  if (!tokens.length) { toast('Create the PowerPoints first.'); return; }
+  $('dlAllBtn').disabled = true;
+  try {
+    const r = await api('/api/download_all', {tokens, name: $('dlAllName').value});
+    if (r.ok) {
+      const a = document.createElement('a');
+      a.href = r.download; a.download = r.file;
+      document.body.appendChild(a); a.click(); a.remove();
+      toast(`Downloading ${r.file} (${r.count} PowerPoint${r.count === 1 ? '' : 's'}).`);
+    } else toast(r.error || "Couldn't build the zip.");
+  } catch (e) { toast('Server error building the zip.'); }
+  $('dlAllBtn').disabled = false;
+}
 
 function hasInput(s) { return (s.artist.trim() && s.title.trim()) || s.url.trim() || s.lyrics.trim(); }
 

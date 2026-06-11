@@ -18,6 +18,7 @@ import secrets
 import tempfile
 import threading
 import time
+import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
@@ -163,7 +164,9 @@ class Handler(BaseHTTPRequestHandler):
             if not entry or not os.path.isfile(entry[0]):
                 self.send_error(404)
                 return
-            self._send_file(entry[0], PPTX_MIME,
+            mime = ('application/zip' if entry[0].lower().endswith('.zip')
+                    else PPTX_MIME)
+            self._send_file(entry[0], mime,
                             download_name=os.path.basename(entry[0]))
             return
 
@@ -191,6 +194,8 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_spotify_playlist(data)
         elif path == '/api/create_one':
             self.handle_create_one(data)
+        elif path == '/api/download_all':
+            self.handle_download_all(data)
         elif path == '/api/save_settings':
             self.handle_save_settings(data)
         elif path == '/api/upload_background':
@@ -287,6 +292,57 @@ class Handler(BaseHTTPRequestHandler):
             'title': song['title'],
             'artist': song['artist'],
             'source': song['source'],
+        })
+
+    def handle_download_all(self, data: dict) -> None:
+        """Bundle the finished .pptx files into one named .zip download."""
+        tokens = data.get('tokens') or []
+        if not isinstance(tokens, list):
+            tokens = []
+        raw_name = (data.get('name') or '').strip()
+        name = core.safe_filename(raw_name) if raw_name else 'Lyrics Slides'
+
+        paths = []
+        with _DOWNLOADS_LOCK:
+            for tok in tokens:
+                entry = _DOWNLOADS.get(str(tok))
+                if entry and os.path.isfile(entry[0]) and entry[0] not in paths:
+                    paths.append(entry[0])
+        if not paths:
+            self._send_json({'ok': False,
+                             'error': 'No finished PowerPoints to bundle - '
+                                      'create the slides first.'})
+            return
+
+        zip_path = os.path.join(_DOWNLOAD_DIR, f'{name}.zip')
+        n = 2
+        while os.path.exists(zip_path):
+            zip_path = os.path.join(_DOWNLOAD_DIR, f'{name} ({n}).zip')
+            n += 1
+
+        try:
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                used = set()
+                for p in paths:
+                    arc = os.path.basename(p)
+                    stem, ext = os.path.splitext(arc)
+                    k = 2
+                    while arc in used:
+                        arc = f'{stem} ({k}){ext}'
+                        k += 1
+                    used.add(arc)
+                    zf.write(p, arc)
+        except OSError as exc:
+            self._send_json({'ok': False,
+                             'error': f"Couldn't build the zip ({exc})."})
+            return
+
+        token = _register_download(zip_path)
+        self._send_json({
+            'ok': True,
+            'download': f'/download/{token}',
+            'file': os.path.basename(zip_path),
+            'count': len(paths),
         })
 
     def handle_save_settings(self, data: dict) -> None:
