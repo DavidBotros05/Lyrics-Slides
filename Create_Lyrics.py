@@ -306,6 +306,75 @@ def _clean_genius_lyrics(text: str) -> list[str]:
     return cleaned
 
 
+LRCLIB_API = 'https://lrclib.net/api'
+# LRCLIB asks clients to identify themselves; no token or signup needed.
+LRCLIB_HEADERS = {'User-Agent': 'PowerpointLyrics/1.0',
+                  'Lrclib-Client': 'PowerpointLyrics/1.0'}
+
+
+def _lrclib_record_to_song(rec: dict, artist: str, title: str) -> dict | None:
+    """Convert one LRCLIB API record into the project's song dict, or None."""
+    if not isinstance(rec, dict) or rec.get('instrumental'):
+        return None
+    text = rec.get('plainLyrics') or ''
+    if not text.strip():
+        return None
+    return {
+        'title': (rec.get('trackName') or title).strip() or 'song',
+        'artist': (rec.get('artistName') or artist).strip(),
+        'lyrics': [ln.rstrip() for ln in text.splitlines()],
+        'source': 'LRCLIB',
+    }
+
+
+def fetch_from_lrclib(artist: str = '', title: str = '') -> dict | None:
+    """Look up a song on LRCLIB (lrclib.net) — free, no token, no anti-bot.
+
+    Tries an exact match first (/api/get), then a fuzzy search (/api/search)
+    and picks the first non-instrumental result with plain lyrics.
+    """
+    global LAST_ERROR
+    if requests is None:
+        LAST_ERROR = "The 'requests' package isn't installed."
+        return None
+
+    if not title:
+        LAST_ERROR = 'LRCLIB needs at least a song title.'
+        return None
+
+    # 1) Exact match.
+    try:
+        resp = requests.get(f'{LRCLIB_API}/get',
+                            params={'artist_name': artist, 'track_name': title},
+                            headers=LRCLIB_HEADERS, timeout=15)
+        if resp.ok:
+            song = _lrclib_record_to_song(resp.json(), artist, title)
+            if song:
+                return song
+    except Exception as exc:
+        LAST_ERROR = f'LRCLIB lookup failed ({exc}).'
+
+    # 2) Fuzzy search.
+    try:
+        resp = requests.get(f'{LRCLIB_API}/search',
+                            params={'track_name': title, 'artist_name': artist}
+                                   if artist else {'q': title},
+                            headers=LRCLIB_HEADERS, timeout=15)
+        resp.raise_for_status()
+        results = resp.json()
+        if isinstance(results, list):
+            for rec in results:
+                song = _lrclib_record_to_song(rec, artist, title)
+                if song:
+                    return song
+    except Exception as exc:
+        LAST_ERROR = f'LRCLIB search failed ({exc}).'
+        return None
+
+    LAST_ERROR = LAST_ERROR or 'No matching song found on LRCLIB.'
+    return None
+
+
 def fetch_from_genius(artist: str = '', title: str = '', url: str = '') -> dict | None:
     """Lookup from Genius.
 
@@ -411,14 +480,19 @@ def fetch_song(artist: str = '', title: str = '',
         if song:
             return song
 
-    # Fall back to searching by artist + title (needs both).
+    # Fall back to searching by name. LRCLIB goes first: it's a free open API
+    # with no token and no Cloudflare anti-bot wall (unlike Genius/AZLyrics).
+    if title:
+        song = fetch_from_lrclib(artist, title)
+        if song:
+            return song
     if artist and title:
         song = fetch_from_genius(artist, title) or fetch_from_azlyrics(artist, title)
         if song:
             return song
 
     if not LAST_ERROR:
-        LAST_ERROR = "Enter an artist and title, or paste a Genius/AZLyrics link."
+        LAST_ERROR = "Enter a song title (artist optional), or paste a Genius/AZLyrics link."
     return None
 
 
@@ -1296,7 +1370,8 @@ def main() -> None:
     sys.stdout = open(CUR_DIR + "/songs done.txt", "a")
 
     for song in songs:
-        print(safe_filename(song['title']))
+        note = f" (lyrics from {song['source']})" if song.get('source') else ''
+        print(safe_filename(song['title']) + note)
         build_song_presentation(
             song, output_base, selected_backgrounds=selected_backgrounds)
 

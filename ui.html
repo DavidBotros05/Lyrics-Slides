@@ -359,7 +359,7 @@ async function createAll() {
         made++;
         s.downloadUrl = r.download;
         s.file = r.file;
-        setStatus(i, 'Ready - tap Download below', 'ok');
+        setStatus(i, `Ready - tap Download below${r.source ? ' (lyrics from ' + r.source + ')' : ''}`, 'ok');
       }
       else {
         failed++;
