@@ -1,0 +1,8 @@
+python-pptx
+requests
+beautifulsoup4
+lxml
+Pillow
+azapi
+lyricsgenius
+python-dotenv

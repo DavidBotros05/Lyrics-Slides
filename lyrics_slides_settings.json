@@ -1,0 +1,21 @@
+{
+  "background_colors": {
+    "Ark Of The Covenant.jpg": "Auto",
+    "Book.jpeg": "Auto",
+    "Cross-Background.jpg": "White",
+    "Subject.png": "Auto",
+    "Unmute.png": "Auto",
+    "image 2.jpg": "Auto",
+    "image1.jpeg": "White"
+  },
+  "background_selected": {
+    "Ark Of The Covenant.jpg": true,
+    "Book.jpeg": true,
+    "Cross-Background.jpg": true,
+    "Subject.png": true,
+    "Unmute.png": true,
+    "image 2.jpg": true,
+    "image1.jpeg": true
+  },
+  "output_folder": "/Users/david/Desktop/terst/"
+}
