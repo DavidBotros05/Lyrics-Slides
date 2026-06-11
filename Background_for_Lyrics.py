@@ -27,16 +27,6 @@ OUTPUT_PPTX = CUR_DIR + "/"
 #   Light gray: (220, 220, 220)
 TEXT_RGB = (255, 255, 255)
 
-# Manual color overrides, used ONLY as a fallback when automatic brightness
-# detection is unavailable (e.g. Pillow not installed or image unreadable).
-MANUAL_COLOR_OVERRIDES = {
-    'image 2.jpg': (0, 0, 0),
-    'Ark Of The Covenant.jpg': (0, 0, 0),
-    'Book.jpg': (0, 0, 0),
-    'Subject.png': (0, 0, 0),
-}
-
-
 def _relative_luminance(r, g, b):
     """WCAG relative luminance (0..1) for an sRGB pixel."""
     def lin(c):
@@ -62,6 +52,14 @@ def pick_text_color(image_path):
         return None
     try:
         with Image.open(image_path) as im:
+            # Transparent areas show the white slide behind the picture, so
+            # composite onto white first - otherwise PNG transparency would
+            # be counted as black and flip the choice the wrong way.
+            if im.mode in ('RGBA', 'LA', 'PA') or (
+                    im.mode == 'P' and 'transparency' in im.info):
+                im = im.convert('RGBA')
+                white = Image.new('RGBA', im.size, (255, 255, 255, 255))
+                im = Image.alpha_composite(white, im)
             im = im.convert('RGB')
             im = im.resize((64, 64))
             pixels = list(im.getdata())
@@ -77,7 +75,24 @@ def pick_text_color(image_path):
     return (255, 255, 255) if contrast_white >= contrast_black else (0, 0, 0)
 
 
-def Background_image(path, prs, source = 'random', color = (255,255,255), auto_color = True):
+# Per-image placement, as fractions of the slide size:
+#   x / y = offset of the picture's top-left corner (0 = top-left of slide,
+#           negative or >1 puts it partly outside the slide -> cropped)
+#   w / h = picture size (1.0 = exactly the slide's width/height)
+# The identity transform stretches the image to fill the slide exactly.
+# Saved per-image layouts (from the UI's "Adjust" editor) live in
+# lyrics_slides_settings.json under "background_transforms" and are passed in
+# via the `transform` argument; these defaults cover images without one.
+IDENTITY_TRANSFORM = {'x': 0.0, 'y': 0.0, 'w': 1.0, 'h': 1.0}
+DEFAULT_TRANSFORMS = {
+    # Former hardcoded placements, expressed as slide fractions.
+    'image1.jpeg': {'x': 0.0, 'y': 0.0, 'w': 1.0, 'h': 20.2 / 19.05},
+    'Unmute.png': {'x': 0.0, 'y': -12.64 / 19.05, 'w': 1.0, 'h': 38.1 / 19.05},
+}
+
+
+def Background_image(path, prs, source = 'random', color = (255,255,255), auto_color = True,
+                     transform = None):
     images = []
 
     if source == 'random':
@@ -95,26 +110,31 @@ def Background_image(path, prs, source = 'random', color = (255,255,255), auto_c
     else:
         image = source
 
-    info_image = {'image':image,'color':color,'width':prs.slide_width ,'height': prs.slide_height, 'horizontal offset': 0 ,'vertical offset': 0}
+    # Saved layout from the UI wins; otherwise a known default; otherwise
+    # stretch-to-fill.
+    t = dict(IDENTITY_TRANSFORM)
+    t.update(DEFAULT_TRANSFORMS.get(image, {}))
+    if isinstance(transform, dict):
+        for key in ('x', 'y', 'w', 'h'):
+            if key in transform:
+                try:
+                    t[key] = float(transform[key])
+                except (TypeError, ValueError):
+                    pass
 
-    if image == 'image1.jpeg':
-        info_image['height'] = Cm(20.2)
-        info_image['width'] = Cm(25.4)
+    info_image = {'image': image, 'color': color,
+                  'width': int(round(prs.slide_width * t['w'])),
+                  'height': int(round(prs.slide_height * t['h'])),
+                  'horizontal offset': int(round(prs.slide_width * t['x'])),
+                  'vertical offset': int(round(prs.slide_height * t['y']))}
 
-    elif image == 'Unmute.png':
-        info_image['height'] = Cm(38.1)
-        info_image['width'] = Cm(25.4)
-        info_image['vertical offset'] = Cm(-12.64)
-
-    # In auto mode, known manual overrides win; otherwise use image analysis.
-    # In manual mode, the caller's color is used as-is.
+    # Auto mode: pick black/white from the image's brightness. The only
+    # override is the Black/White choice in the UI (auto_color=False), in
+    # which case the caller's color is used as-is.
     if auto_color:
-        if image in MANUAL_COLOR_OVERRIDES:
-            info_image['color'] = MANUAL_COLOR_OVERRIDES[image]
-        else:
-            chosen = pick_text_color(os.path.join(path, image))
-            if chosen is not None:
-                info_image['color'] = chosen
+        chosen = pick_text_color(os.path.join(path, image))
+        if chosen is not None:
+            info_image['color'] = chosen
 
     return info_image
 

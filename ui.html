@@ -126,6 +126,24 @@
   .modal .mrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
   .modal .mbtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
 
+  /* background position/stretch editor */
+  #adjStage { position: relative; height: 380px; background: #0a0c12;
+    border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
+    cursor: grab; touch-action: none; user-select: none; }
+  #adjStage:active { cursor: grabbing; }
+  #adjGhost { position: absolute; opacity: .28; pointer-events: none; }
+  #adjSlide { position: absolute; overflow: hidden; background: #fff;
+    outline: 2px dashed var(--accent); pointer-events: none; }
+  #adjImg { position: absolute; pointer-events: none; max-width: none; }
+  #adjText { position: absolute; inset: 0; display: flex; align-items: center;
+    justify-content: center; text-align: center; font-weight: 700;
+    font-size: 15px; line-height: 1.7; pointer-events: none; }
+  .adj-controls { display: flex; gap: 18px; margin-top: 12px; flex-wrap: wrap; }
+  .adj-controls label { display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--muted); }
+  .adj-controls input[type=range] { width: 150px; }
+  .adj-controls .val { min-width: 42px; color: var(--text); }
+
   .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%);
     background: var(--panel2); border: 1px solid var(--border); padding: 10px 20px;
     border-radius: 10px; font-size: 14px; display: none; z-index: 60; }
@@ -149,10 +167,21 @@
 
   <div class="card" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
     <label style="font-weight:600">How many songs?</label>
-    <input type="number" id="songCount" min="1" max="50" value="1"
+    <input type="number" id="songCount" min="1" max="200" value="1"
            style="width:80px; text-align:center"
            onchange="setSongCount(this.value)" onkeydown="if(event.key==='Enter')setSongCount(this.value)">
     <span class="hint">Rows update as you change the number - filled-in songs are kept.</span>
+  </div>
+
+  <div class="card">
+    <h2>&#127911; Import from a Spotify playlist</h2>
+    <div style="display:flex; gap:8px">
+      <input type="text" id="spotifyLink" placeholder="https://open.spotify.com/playlist/..."
+             style="flex:1" onkeydown="if(event.key==='Enter')importSpotify()">
+      <button onclick="importSpotify()" id="spotifyBtn">Import songs</button>
+    </div>
+    <div class="hint" id="spotifyStatus">Paste a public playlist (or album) link - every song and its
+      artist is added as a row below. No Spotify login needed. Lyrics are then looked up per song as usual.</div>
   </div>
 
   <div id="songs"></div>
@@ -173,6 +202,7 @@
 
   <div class="bigbar">
     <button class="primary" id="createBtn" onclick="createAll()">Create PowerPoints</button>
+    <button class="danger" id="stopBtn" style="display:none" onclick="stopCreating()">&#9632; Stop</button>
     <span id="globalStatus" class="hint"></span>
   </div>
 </div>
@@ -194,6 +224,39 @@
   </div>
 </div>
 
+<!-- background position/stretch editor -->
+<div class="overlay" id="adjOv">
+  <div class="modal" style="width:720px">
+    <h3>Preview &amp; adjust background</h3>
+    <div class="src" id="adjName"></div>
+    <div id="adjStage">
+      <img id="adjGhost" draggable="false" alt="">
+      <div id="adjSlide">
+        <img id="adjImg" draggable="false" alt="">
+        <div id="adjText">Amazing grace, how sweet the sound<br>That saved a wretch like me</div>
+      </div>
+    </div>
+    <div class="hint">The dashed box is the slide. Drag the image to move it; dimmed parts
+      outside the box are cropped in the real PowerPoint.</div>
+    <div class="adj-controls">
+      <label>Width <input type="range" id="adjW" min="10" max="300"
+        oninput="adjT.w=this.value/100; applyAdjust()"><span class="val" id="adjWVal"></span></label>
+      <label>Height <input type="range" id="adjH" min="10" max="300"
+        oninput="adjT.h=this.value/100; applyAdjust()"><span class="val" id="adjHVal"></span></label>
+    </div>
+    <div class="row-btns">
+      <button onclick="adjStretch()">Stretch to fill</button>
+      <button onclick="adjFit()">Fit (keep ratio)</button>
+      <button onclick="adjCover()">Fill (keep ratio)</button>
+      <button onclick="adjCenter()">Center</button>
+    </div>
+    <div class="mbtns">
+      <button onclick="closeAdjust()">Cancel</button>
+      <button class="primary" onclick="saveAdjust()">Save layout</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -208,9 +271,9 @@ function toast(msg) {
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3200);
 }
 
-async function api(path, body) {
+async function api(path, body, signal) {
   const opts = body ? {method:'POST', headers:{'Content-Type':'application/json'},
-                       body: JSON.stringify(body)} : {};
+                       body: JSON.stringify(body), signal} : {signal};
   const r = await fetch(path, opts);
   return r.json();
 }
@@ -221,7 +284,7 @@ function newSong() {
 }
 
 function setSongCount(n) {
-  n = Math.max(1, Math.min(50, parseInt(n, 10) || 1));
+  n = Math.max(1, Math.min(200, parseInt(n, 10) || 1));
   $('songCount').value = n;
   while (songs.length < n) songs.push(newSong());
   if (songs.length > n) songs.length = n;   // trims from the bottom
@@ -291,6 +354,38 @@ function setStatus(i, msg, cls) { songs[i].status = msg; songs[i].statusCls = cl
 
 function hasInput(s) { return (s.artist.trim() && s.title.trim()) || s.url.trim() || s.lyrics.trim(); }
 
+/* ---------- Spotify playlist import ---------- */
+async function importSpotify() {
+  const link = $('spotifyLink').value.trim();
+  if (!link) { toast('Paste a Spotify playlist link first.'); return; }
+
+  $('spotifyBtn').disabled = true;
+  $('spotifyStatus').innerHTML = '<span class="spin"></span>Reading the playlist&hellip;';
+  try {
+    const r = await api('/api/spotify_playlist', {link});
+    if (!r.ok) {
+      $('spotifyStatus').textContent = r.error || "Couldn't read that playlist.";
+      toast(r.error || "Couldn't read that playlist.");
+    } else {
+      const rows = r.tracks.map(t =>
+        Object.assign(newSong(), {artist: t.artist, title: t.title}));
+      // Replace the rows if nothing was typed yet; otherwise add to the end.
+      if (songs.every(s => !hasInput(s))) songs = rows;
+      else songs = songs.concat(rows);
+      $('songCount').value = songs.length;
+      let msg = `Imported ${r.tracks.length} song${r.tracks.length === 1 ? '' : 's'} from "${r.name}".`;
+      if (r.note) msg += ' ' + r.note;
+      $('spotifyStatus').textContent = msg;
+      $('spotifyLink').value = '';
+      render();
+      toast(`Added ${r.tracks.length} songs from "${r.name}".`);
+    }
+  } catch (e) {
+    $('spotifyStatus').textContent = 'Server error reading the playlist.';
+  }
+  $('spotifyBtn').disabled = false;
+}
+
 /* ---------- lyrics preview / manual paste ---------- */
 async function previewLyrics(i) {
   const s = songs[i];
@@ -339,22 +434,37 @@ function saveModal() {
 function clearLyrics(i) { songs[i].lyrics=''; songs[i].source=''; songs[i]._fetchedSource=''; setStatus(i,'',''); }
 
 /* ---------- create ---------- */
+let stopRequested = false;
+let currentFetchCtrl = null;
+
+function stopCreating() {
+  stopRequested = true;
+  $('stopBtn').disabled = true;
+  $('globalStatus').textContent = 'Stopping...';
+  if (currentFetchCtrl) currentFetchCtrl.abort();
+}
+
 async function createAll() {
   const todo = songs.map((s, i) => [s, i]).filter(([s]) => hasInput(s));
   if (!todo.length) { toast('Fill in at least one song first.'); return; }
 
   await saveSettings();
+  stopRequested = false;
   $('createBtn').disabled = true;
-  let made = 0, failed = 0;
+  $('stopBtn').style.display = '';
+  $('stopBtn').disabled = false;
+  let made = 0, failed = 0, skipped = 0;
 
   for (const [s, i] of todo) {
+    if (stopRequested) { skipped++; setStatus(i, 'Skipped (stopped)', ''); continue; }
     setStatus(i, 'Working...', 'busy');
     $('globalStatus').textContent = `Creating ${made + failed + 1} of ${todo.length}...`;
     try {
+      currentFetchCtrl = new AbortController();
       const r = await api('/api/create_one', {
         artist: s.artist, title: s.title, url: s.url, lyrics: s.lyrics,
         source: s.source, background: s.bg,
-      });
+      }, currentFetchCtrl.signal);
       if (r.ok) {
         made++;
         s.downloadUrl = r.download;
@@ -366,12 +476,24 @@ async function createAll() {
         setStatus(i, r.error || 'Failed', 'err');
         if (r.needs_lyrics) toast(`Song ${i + 1}: not found - use "Preview / edit lyrics" to paste them manually.`);
       }
-    } catch (e) { failed++; setStatus(i, 'Server error', 'err'); }
+    } catch (e) {
+      if (stopRequested || e.name === 'AbortError') {
+        skipped++;
+        setStatus(i, 'Stopped', 'err');
+      } else { failed++; setStatus(i, 'Server error', 'err'); }
+    }
+    currentFetchCtrl = null;
   }
 
+  currentFetchCtrl = null;
   $('createBtn').disabled = false;
-  $('globalStatus').textContent = `Done - ${made} created${failed ? ', ' + failed + ' failed' : ''}.`;
-  toast(`Done: ${made} PowerPoint${made === 1 ? '' : 's'} ready${failed ? ', ' + failed + ' failed' : ''}. Tap the green Download buttons.`);
+  $('stopBtn').style.display = 'none';
+  const bits = [`${made} ready`];
+  if (failed) bits.push(`${failed} failed`);
+  if (skipped) bits.push(`${skipped} stopped`);
+  $('globalStatus').textContent = (stopRequested ? 'Stopped - ' : 'Done - ') + bits.join(', ') + '.';
+  toast((stopRequested ? 'Stopped: ' : 'Done: ') + bits.join(', ') +
+        (made ? '. Tap the green Download buttons.' : '.'));
 }
 
 /* ---------- backgrounds manager ---------- */
@@ -383,6 +505,7 @@ function renderMgr() {
         <span class="tr"></span></label>
       <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
       <span class="nm">${esc(b.name)}</span>
+      <button onclick="openAdjust(${i})" style="padding:5px 12px; font-size:13px">Adjust</button>
       <select onchange="backgrounds[${i}].color_mode=this.value; saveSettings()">
         ${['Auto','Black','White'].map(m =>
           `<option ${b.color_mode === m ? 'selected' : ''}>${m}</option>`).join('')}
@@ -391,13 +514,127 @@ function renderMgr() {
 }
 
 async function saveSettings() {
-  const colors = {}, selected = {};
-  for (const b of backgrounds) { colors[b.name] = b.color_mode; selected[b.name] = b.selected; }
+  const colors = {}, selected = {}, transforms = {};
+  for (const b of backgrounds) {
+    colors[b.name] = b.color_mode;
+    selected[b.name] = b.selected;
+    if (b.transform) transforms[b.name] = b.transform;
+  }
   await api('/api/save_settings', {
     background_colors: colors,
     background_selected: selected,
+    background_transforms: transforms,
   });
 }
+
+/* ---------- background position/stretch editor ---------- */
+const SLIDE_AR = 3 / 4;   // slides are 10in x 7.5in (4:3)
+let adjIdx = -1, adjT = {x:0, y:0, w:1, h:1}, adjDims = null, adjDrag = null;
+let adjNat = {w: 4, h: 3};
+
+function openAdjust(i) {
+  adjIdx = i;
+  const b = backgrounds[i];
+  adjT = Object.assign({x:0, y:0, w:1, h:1}, b.transform || {});
+  $('adjName').textContent = b.name;
+
+  const src = '/backgrounds/' + encodeURIComponent(b.name);
+  const img = $('adjImg'), ghost = $('adjGhost');
+  img.onload = () => { adjNat = {w: img.naturalWidth || 4, h: img.naturalHeight || 3}; };
+  img.src = ghost.src = src;
+
+  // Sample lyrics in the color the slides will actually use.
+  const c = b.color_mode === 'Black' ? '#000'
+          : b.color_mode === 'White' ? '#fff'
+          : (b.auto_color === 'white' ? '#fff' : '#000');
+  const halo = c === '#fff' ? '#000' : '#fff';
+  const tx = $('adjText');
+  tx.style.color = c;
+  tx.style.textShadow = `0 0 6px ${halo}, 0 0 2px ${halo}, 1px 1px 3px ${halo}`;
+
+  $('adjOv').classList.add('show');
+  layoutAdjust();
+  syncAdjSliders();
+}
+
+function layoutAdjust() {
+  const stage = $('adjStage');
+  const slideW = Math.round(Math.min(stage.clientWidth * 0.68,
+                                     (stage.clientHeight * 0.82) / SLIDE_AR));
+  const slideH = Math.round(slideW * SLIDE_AR);
+  const sx = Math.round((stage.clientWidth - slideW) / 2);
+  const sy = Math.round((stage.clientHeight - slideH) / 2);
+  adjDims = {slideW, slideH, sx, sy};
+  Object.assign($('adjSlide').style,
+    {left: sx + 'px', top: sy + 'px', width: slideW + 'px', height: slideH + 'px'});
+  applyAdjust();
+}
+
+function applyAdjust() {
+  const {slideW, slideH, sx, sy} = adjDims;
+  const l = adjT.x * slideW, t = adjT.y * slideH;
+  const w = adjT.w * slideW, h = adjT.h * slideH;
+  Object.assign($('adjImg').style,
+    {left: l + 'px', top: t + 'px', width: w + 'px', height: h + 'px'});
+  Object.assign($('adjGhost').style,
+    {left: (sx + l) + 'px', top: (sy + t) + 'px', width: w + 'px', height: h + 'px'});
+  $('adjWVal').textContent = Math.round(adjT.w * 100) + '%';
+  $('adjHVal').textContent = Math.round(adjT.h * 100) + '%';
+}
+
+function syncAdjSliders() {
+  $('adjW').value = Math.round(adjT.w * 100);
+  $('adjH').value = Math.round(adjT.h * 100);
+  applyAdjust();
+}
+
+function adjStretch() { adjT = {x:0, y:0, w:1, h:1}; syncAdjSliders(); }
+function adjCenter()  { adjT.x = (1 - adjT.w) / 2; adjT.y = (1 - adjT.h) / 2; applyAdjust(); }
+function adjFit() {   // whole image visible, aspect ratio kept
+  const ir = adjNat.w / adjNat.h, sr = 4 / 3;
+  const w = ir >= sr ? 1 : ir / sr, h = ir >= sr ? sr / ir : 1;
+  adjT = {w, h, x: (1 - w) / 2, y: (1 - h) / 2};
+  syncAdjSliders();
+}
+function adjCover() {  // slide fully covered, aspect ratio kept (edges cropped)
+  const ir = adjNat.w / adjNat.h, sr = 4 / 3;
+  const w = ir >= sr ? ir / sr : 1, h = ir >= sr ? 1 : sr / ir;
+  adjT = {w, h, x: (1 - w) / 2, y: (1 - h) / 2};
+  syncAdjSliders();
+}
+
+function closeAdjust() { adjIdx = -1; adjDrag = null; $('adjOv').classList.remove('show'); }
+
+async function saveAdjust() {
+  if (adjIdx < 0) return;
+  backgrounds[adjIdx].transform = {
+    x: +adjT.x.toFixed(4), y: +adjT.y.toFixed(4),
+    w: +adjT.w.toFixed(4), h: +adjT.h.toFixed(4),
+  };
+  closeAdjust();
+  await saveSettings();
+  toast('Background layout saved.');
+}
+
+(function wireAdjustDrag() {
+  const stage = $('adjStage');
+  stage.addEventListener('pointerdown', e => {
+    if (adjIdx < 0) return;
+    adjDrag = {px: e.clientX, py: e.clientY, x: adjT.x, y: adjT.y};
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener('pointermove', e => {
+    if (!adjDrag) return;
+    adjT.x = adjDrag.x + (e.clientX - adjDrag.px) / adjDims.slideW;
+    adjT.y = adjDrag.y + (e.clientY - adjDrag.py) / adjDims.slideH;
+    applyAdjust();
+  });
+  for (const ev of ['pointerup', 'pointercancel'])
+    stage.addEventListener(ev, () => { adjDrag = null; });
+  window.addEventListener('resize', () => {
+    if (adjIdx >= 0 && $('adjOv').classList.contains('show')) layoutAdjust();
+  });
+})();
 
 function uploadBg(input) {
   const file = input.files[0];
@@ -433,7 +670,9 @@ async function loadBackgrounds() {
   render();
 })();
 
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal(); closeAdjust(); }
+});
 </script>
 </body>
 </html>

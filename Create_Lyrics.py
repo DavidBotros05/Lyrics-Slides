@@ -403,6 +403,198 @@ def fetch_from_lrclib(artist: str = '', title: str = '') -> dict | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Spotify playlist import
+#
+# Two ways to read a playlist, tried in this order:
+#   1. The public embed page (open.spotify.com/embed/playlist/<id>) — no
+#      account, token, or login needed. Works for any public playlist/album,
+#      but very long playlists may be truncated (~100 tracks).
+#   2. The official Web API — used automatically when SPOTIFY_CLIENT_ID and
+#      SPOTIFY_CLIENT_SECRET are set in the .env file. Gets every track with
+#      clean artist names, no truncation.
+#
+# Note: Spotify's public API does NOT expose lyrics (the lyrics inside the
+# Spotify app come from Musixmatch through a private endpoint), so lyrics are
+# still fetched per song from LRCLIB / Genius / AZLyrics as before.
+# ---------------------------------------------------------------------------
+
+SPOTIFY_CLIENT_ID = os.environ.get('SPOTIFY_CLIENT_ID', '')
+SPOTIFY_CLIENT_SECRET = os.environ.get('SPOTIFY_CLIENT_SECRET', '')
+
+
+def _spotify_parse_link(text: str) -> tuple[str, str]:
+    """Return (kind, id) from a Spotify link/URI, e.g. ('playlist', '37i9…').
+
+    Accepts open.spotify.com URLs (with or without locale prefixes or query
+    strings), spotify:playlist:<id> URIs, and bare 22-character IDs.
+    Kind is 'playlist' or 'album'; ('', '') when nothing matches.
+    """
+    t = (text or '').strip()
+    if not t:
+        return '', ''
+
+    m = re.search(r'open\.spotify\.com/(?:[a-z\-]+/)??(playlist|album)/([A-Za-z0-9]{22})', t)
+    if m:
+        return m.group(1), m.group(2)
+
+    m = re.match(r'spotify:(playlist|album):([A-Za-z0-9]{22})$', t)
+    if m:
+        return m.group(1), m.group(2)
+
+    if re.fullmatch(r'[A-Za-z0-9]{22}', t):
+        return 'playlist', t
+
+    return '', ''
+
+
+def _spotify_find_key(obj, key):
+    """Depth-first search for the first value of `key` in nested JSON."""
+    if isinstance(obj, dict):
+        if key in obj:
+            return obj[key]
+        for v in obj.values():
+            found = _spotify_find_key(v, key)
+            if found is not None:
+                return found
+    elif isinstance(obj, list):
+        for v in obj:
+            found = _spotify_find_key(v, key)
+            if found is not None:
+                return found
+    return None
+
+
+def _spotify_from_embed(kind: str, spotify_id: str) -> dict | None:
+    """Read a playlist/album from its public embed page (no credentials)."""
+    _require_scraper_packages()
+
+    url = f'https://open.spotify.com/embed/{kind}/{spotify_id}'
+    resp = requests.get(url, headers=BROWSER_HEADERS, timeout=20)
+    resp.raise_for_status()
+
+    m = re.search(
+        r'<script id="__NEXT_DATA__" type="application/json"[^>]*>(.*?)</script>',
+        resp.text, re.S)
+    if not m:
+        return None
+
+    data = json.loads(m.group(1))
+    try:
+        entity = data['props']['pageProps']['state']['data']['entity']
+    except (KeyError, TypeError):
+        entity = None
+    track_list = (entity or {}).get('trackList') or _spotify_find_key(data, 'trackList')
+    if not track_list:
+        return None
+
+    tracks = []
+    for item in track_list:
+        title = (item.get('title') or '').strip()
+        artist = (item.get('subtitle') or '').strip()
+        if title:
+            tracks.append({'title': title, 'artist': artist})
+
+    name = ((entity or {}).get('name')
+            or _spotify_find_key(data, 'name') or '').strip()
+    total = (entity or {}).get('trackCount') or len(tracks)
+    return {'name': name or 'Spotify playlist', 'tracks': tracks,
+            'total': int(total), 'method': 'embed'}
+
+
+def _spotify_api_token() -> str:
+    """Client-credentials token from the official API (no user login)."""
+    resp = requests.post(
+        'https://accounts.spotify.com/api/token',
+        data={'grant_type': 'client_credentials'},
+        auth=(SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET), timeout=15)
+    resp.raise_for_status()
+    return resp.json()['access_token']
+
+
+def _spotify_from_api(kind: str, spotify_id: str) -> dict | None:
+    """Read every track via the official Web API (needs client ID + secret)."""
+    headers = {'Authorization': f'Bearer {_spotify_api_token()}'}
+    base = f'https://api.spotify.com/v1/{kind}s/{spotify_id}'
+
+    resp = requests.get(base, params={'fields': 'name'} if kind == 'playlist' else None,
+                        headers=headers, timeout=15)
+    resp.raise_for_status()
+    name = (resp.json().get('name') or '').strip()
+
+    tracks, url = [], f'{base}/tracks'
+    params = {'limit': 100 if kind == 'playlist' else 50}
+    while url:
+        resp = requests.get(url, params=params, headers=headers, timeout=15)
+        resp.raise_for_status()
+        page = resp.json()
+        for item in page.get('items', []):
+            tr = item.get('track', item) or {}
+            title = (tr.get('name') or '').strip()
+            artists = ', '.join(a.get('name', '') for a in tr.get('artists', [])
+                                if a.get('name'))
+            if title:
+                tracks.append({'title': title, 'artist': artists})
+        url, params = page.get('next'), None  # 'next' already carries the query
+
+    if not tracks:
+        return None
+    return {'name': name or 'Spotify playlist', 'tracks': tracks,
+            'total': len(tracks), 'method': 'api'}
+
+
+def fetch_spotify_playlist(link: str) -> dict | None:
+    """Fetch the song list of a Spotify playlist/album link.
+
+    Returns {'name', 'tracks': [{'title', 'artist'}, ...], 'total', 'note'}
+    or None with LAST_ERROR set. Uses the official API when credentials are
+    in .env, otherwise the public embed page (no account needed).
+    """
+    global LAST_ERROR
+    LAST_ERROR = ''
+
+    kind, spotify_id = _spotify_parse_link(link)
+    if not spotify_id:
+        LAST_ERROR = ("That doesn't look like a Spotify playlist link. Paste "
+                      "one like https://open.spotify.com/playlist/...")
+        return None
+    if requests is None:
+        LAST_ERROR = "The 'requests' package isn't installed."
+        return None
+
+    result = None
+
+    # 1) Official API when credentials are available (full track list).
+    if SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET:
+        try:
+            result = _spotify_from_api(kind, spotify_id)
+        except Exception as exc:
+            LAST_ERROR = f'Spotify API lookup failed ({_short_err(exc)}).'
+
+    # 2) Public embed page — no credentials needed.
+    if result is None:
+        try:
+            result = _spotify_from_embed(kind, spotify_id)
+        except Exception as exc:
+            LAST_ERROR = (LAST_ERROR or
+                          f"Couldn't load that Spotify {kind} ({_short_err(exc)}).")
+            return None
+
+    if not result or not result['tracks']:
+        LAST_ERROR = (LAST_ERROR or
+                      f"No tracks found - is the {kind} public?")
+        return None
+
+    note = ''
+    if result['method'] == 'embed' and result['total'] > len(result['tracks']):
+        note = (f"Only the first {len(result['tracks'])} of {result['total']} "
+                "tracks could be read without Spotify API credentials. Add "
+                "SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET to the .env file "
+                "to import the full playlist.")
+    result['note'] = note
+    return result
+
+
 def fetch_from_genius(artist: str = '', title: str = '', url: str = '') -> dict | None:
     """Lookup from Genius.
 
@@ -1305,12 +1497,16 @@ def safe_filename(name: str) -> str:
 
 def _background_info(prs, background: dict | None,
                      selected_backgrounds: list[dict] | None):
-    """Resolve which background image/text-color to use for one song.
+    """Resolve which background image/text-color/layout to use for one song.
 
     `background` is a specific choice like {'image': name, 'color_mode': mode}.
     If it's None (or its image is 'random'), one is picked at random from
     `selected_backgrounds`, falling back to a random image from the folder.
+    The image's saved layout (position/stretch from the UI's "Adjust" editor,
+    stored in lyrics_slides_settings.json) is always applied.
     """
+    images_dir = CUR_DIR + '/background_images'
+
     chosen = None
     if background and background.get('image') and background['image'] != 'random':
         chosen = background
@@ -1318,19 +1514,31 @@ def _background_info(prs, background: dict | None,
         chosen = random.choice(selected_backgrounds)
 
     if chosen is None:
-        return Background_image(CUR_DIR + '/background_images', prs)
+        # Random pick from the whole folder.
+        try:
+            files = [f for f in os.listdir(images_dir)
+                     if not f.startswith((',', '.'))
+                     and f.lower().endswith(('.png', '.jpg', '.jpeg'))]
+        except FileNotFoundError:
+            files = []
+        if not files:
+            return Background_image(images_dir, prs)  # keep original error path
+        chosen = {'image': random.choice(files), 'color_mode': 'Auto'}
+
+    transforms = load_app_settings().get('background_transforms', {}) or {}
+    transform = transforms.get(chosen['image'])
 
     color_mode = chosen.get('color_mode', 'Auto')
     if color_mode == 'Black':
         return Background_image(
-            CUR_DIR + '/background_images', prs, source=chosen['image'],
-            color=(0, 0, 0), auto_color=False)
+            images_dir, prs, source=chosen['image'],
+            color=(0, 0, 0), auto_color=False, transform=transform)
     if color_mode == 'White':
         return Background_image(
-            CUR_DIR + '/background_images', prs, source=chosen['image'],
-            color=(255, 255, 255), auto_color=False)
+            images_dir, prs, source=chosen['image'],
+            color=(255, 255, 255), auto_color=False, transform=transform)
     return Background_image(
-        CUR_DIR + '/background_images', prs, source=chosen['image'])
+        images_dir, prs, source=chosen['image'], transform=transform)
 
 
 def build_song_presentation(song: dict, output_base: str,

@@ -23,6 +23,8 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 import Create_Lyrics as core
+from Background_for_Lyrics import (DEFAULT_TRANSFORMS, IDENTITY_TRANSFORM,
+                                   pick_text_color)
 
 CUR_DIR = str(Path(__file__).resolve().parent)
 IMAGES_DIR = os.path.join(CUR_DIR, 'background_images')
@@ -134,15 +136,22 @@ class Handler(BaseHTTPRequestHandler):
             settings = core.load_app_settings()
             colors = settings.get('background_colors', {}) or {}
             selected = settings.get('background_selected', {}) or {}
+            transforms = settings.get('background_transforms', {}) or {}
             items = []
             for name in list_background_images():
                 mode = colors.get(name, 'Auto')
                 if mode not in ('Auto', 'Black', 'White'):
                     mode = 'Auto'
+                transform = (transforms.get(name)
+                             or DEFAULT_TRANSFORMS.get(name)
+                             or IDENTITY_TRANSFORM)
+                auto = pick_text_color(os.path.join(IMAGES_DIR, name))
                 items.append({
                     'name': name,
                     'color_mode': mode,
                     'selected': bool(selected.get(name, True)),
+                    'transform': transform,
+                    'auto_color': 'white' if auto == (255, 255, 255) else 'black',
                 })
             self._send_json({'ok': True, 'backgrounds': items})
             return
@@ -178,6 +187,8 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/preview':
             self.handle_preview(data)
+        elif path == '/api/spotify_playlist':
+            self.handle_spotify_playlist(data)
         elif path == '/api/create_one':
             self.handle_create_one(data)
         elif path == '/api/save_settings':
@@ -199,6 +210,23 @@ class Handler(BaseHTTPRequestHandler):
             'artist': song['artist'],
             'source': song['source'],
             'lyrics': '\n'.join(song['lyrics']),
+        })
+
+    def handle_spotify_playlist(self, data: dict) -> None:
+        """Return every song (title + artist) in a Spotify playlist/album."""
+        link = (data.get('link') or '').strip()
+        result = core.fetch_spotify_playlist(link)
+        if result is None:
+            self._send_json({'ok': False,
+                             'error': core.LAST_ERROR or
+                                      "Couldn't read that Spotify playlist."})
+            return
+        self._send_json({
+            'ok': True,
+            'name': result['name'],
+            'tracks': result['tracks'],
+            'total': result['total'],
+            'note': result.get('note', ''),
         })
 
     def handle_create_one(self, data: dict) -> None:
@@ -272,6 +300,21 @@ class Handler(BaseHTTPRequestHandler):
             settings['background_selected'] = {
                 str(k): bool(v) for k, v in data['background_selected'].items()
             }
+        if isinstance(data.get('background_transforms'), dict):
+            clean = {}
+            for name, t in data['background_transforms'].items():
+                if not isinstance(t, dict):
+                    continue
+                try:
+                    clean[str(name)] = {
+                        'x': max(-5.0, min(5.0, float(t.get('x', 0.0)))),
+                        'y': max(-5.0, min(5.0, float(t.get('y', 0.0)))),
+                        'w': max(0.05, min(5.0, float(t.get('w', 1.0)))),
+                        'h': max(0.05, min(5.0, float(t.get('h', 1.0)))),
+                    }
+                except (TypeError, ValueError):
+                    continue
+            settings['background_transforms'] = clean
         core.save_app_settings(settings)
         self._send_json({'ok': True})
 
