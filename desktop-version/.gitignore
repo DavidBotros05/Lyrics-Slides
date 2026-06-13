@@ -1,0 +1,12 @@
+.env
+lyrics_slides_settings.json
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.DS_Store
+songs done.txt
+Created_with_background/*.pptx
+To Add Background/*.pptx
+!Created_with_background/.gitkeep
+!To Add Background/.gitkeep

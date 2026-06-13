@@ -1,5 +1,9 @@
 .env
 __pycache__/
 *.pyc
+*.pyo
 .venv/
 .DS_Store
+/songs done.txt
+/Created_with_background/
+/To Add Background/

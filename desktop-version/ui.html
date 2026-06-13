@@ -128,14 +128,6 @@
     color: var(--bad); background: var(--bad-soft); }
   button:disabled { opacity: .45; cursor: default; }
   .lyr-badge { font-size: 12.5px; font-weight: 500; color: var(--good); }
-  a.dlbtn {
-    display: inline-block; background: var(--good); color: #06241a;
-    border: 1px solid transparent; border-radius: 9px; padding: 8px 16px;
-    font-size: 14px; font-weight: 600; text-decoration: none;
-    transition: filter .15s var(--ease), transform .1s var(--ease);
-  }
-  a.dlbtn:hover { filter: brightness(1.08); }
-  a.dlbtn:active { transform: scale(.98); }
 
   .bigbar { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
   .bigbar button.primary { padding: 12px 28px; font-size: 15px; border-radius: 11px; }
@@ -233,11 +225,13 @@
         <div class="sub">Artist + title, or paste a Genius / AZLyrics link</div>
       </div>
     </div>
+    <button class="danger" onclick="quitApp()" title="Stops app.py - same as Ctrl+C in the terminal">Quit</button>
   </header>
 
   <div id="fileWarn" style="display:none" class="card alert">
     <span style="color:var(--bad); font-weight:600">This page was opened as a file, so nothing will work.</span>
-    <div class="hint">Open the app's web address instead.</div>
+    <div class="hint">Run <b>app.py</b> instead (double-click it or run <code>python app.py</code> in the
+    Creation folder) - it starts the app and opens the right address in your browser automatically.</div>
   </div>
 
   <div class="card" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
@@ -262,6 +256,15 @@
   <div id="songs"></div>
 
   <div class="card">
+    <h2>Output</h2>
+    <label class="fld">Save PowerPoints to</label>
+    <div style="display:flex; gap:8px">
+      <input type="text" id="outFolder" placeholder="/Users/you/Desktop" style="flex:1">
+      <button onclick="browseFolder()" id="browseBtn">Browse&hellip;</button>
+    </div>
+  </div>
+
+  <div class="card">
     <details id="mgrDetails">
       <summary>Manage backgrounds (random pool, text color, add images)</summary>
       <div id="mgrList"></div>
@@ -279,16 +282,6 @@
     <button class="primary" id="createBtn" onclick="createAll()">Create PowerPoints</button>
     <button class="danger" id="stopBtn" style="display:none" onclick="stopCreating()">&#9632; Stop</button>
     <span id="globalStatus" class="hint"></span>
-  </div>
-
-  <div class="card" id="dlAllBar" style="display:none; margin-top:14px">
-    <h2>Download everything</h2>
-    <div style="display:flex; gap:8px; flex-wrap:wrap">
-      <input type="text" id="dlAllName" placeholder="Name the file, e.g. Sunday Worship"
-             style="flex:1; min-width:180px" onkeydown="if(event.key==='Enter')downloadAll()">
-      <button class="primary" onclick="downloadAll()" id="dlAllBtn">&#11015;&#65039; Download all (.zip)</button>
-    </div>
-    <div class="hint" id="dlAllHint">All created PowerPoints in one zip file.</div>
   </div>
 </div>
 
@@ -357,6 +350,26 @@ function toast(msg) {
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3200);
 }
 
+/* ---- keep-alive heartbeat: lets app.py stop itself when the tab closes ---- */
+function ping(closing) {
+  const url = '/api/ping' + (closing ? '?closing=1' : '');
+  if (closing && navigator.sendBeacon) { navigator.sendBeacon(url, ''); return; }
+  fetch(url, {method:'POST', keepalive:true}).catch(() => {});
+}
+if (location.protocol !== 'file:') {
+  ping(false);
+  setInterval(() => ping(false), 2000);
+  window.addEventListener('pagehide', () => ping(true));
+}
+
+async function quitApp() {
+  try { await api('/api/quit', {}); } catch (e) {}
+  document.body.innerHTML =
+    '<div style="font-family:inherit; text-align:center; margin-top:18vh; color:var(--muted)">' +
+    '<h2 style="color:var(--text)">Lyrics Slides has stopped.</h2>' +
+    'You can close this tab. Run <b>app.py</b> again to restart.</div>';
+}
+
 async function api(path, body, signal) {
   const opts = body ? {method:'POST', headers:{'Content-Type':'application/json'},
                        body: JSON.stringify(body), signal} : {signal};
@@ -382,6 +395,17 @@ function removeSong(i) {
   if (!songs.length) songs.push(newSong());
   $('songCount').value = songs.length;
   render();
+}
+
+async function browseFolder() {
+  $('browseBtn').disabled = true;
+  try {
+    const r = await api('/api/pick_folder', {});
+    if (r.ok && r.path) { $('outFolder').value = r.path; saveSettings(); }
+    else if (r.ok && r.cancelled) { /* user closed the dialog */ }
+    else toast(r.error || "Couldn't open the folder dialog.");
+  } catch (e) { toast('Server error opening the dialog.'); }
+  $('browseBtn').disabled = false;
 }
 
 function esc(s) {
@@ -431,38 +455,12 @@ function render() {
         ${s.statusCls === 'err' ? `<button onclick="retrySong(${i})">&#8635; Retry</button>` : ''}
         ${s.lyrics ? `<span class="lyr-badge">&#10003; Lyrics ready${s.source ? ' (' + esc(s.source) + ')' : ''}</span>
                       <button onclick="clearLyrics(${i})">Clear</button>` : ''}
-        ${s.downloadUrl ? `<a class="dlbtn" href="${esc(s.downloadUrl)}" download="${esc(s.file)}">&#11015;&#65039; Download ${esc(s.file)}</a>` : ''}
         ${songs.length > 1 ? `<button class="danger" style="margin-left:auto" onclick="removeSong(${i})">Remove</button>` : ''}
       </div>
     </div>`).join('');
-  updateDlAllBar();
 }
 
 function setStatus(i, msg, cls) { songs[i].status = msg; songs[i].statusCls = cls || ''; render(); }
-
-function updateDlAllBar() {
-  const ready = songs.filter(s => s.downloadUrl).length;
-  $('dlAllBar').style.display = ready ? '' : 'none';
-  if (ready) $('dlAllHint').textContent =
-    `${ready} PowerPoint${ready === 1 ? '' : 's'} ready - bundled into one zip file.`;
-}
-
-async function downloadAll() {
-  const tokens = songs.filter(s => s.downloadUrl)
-                      .map(s => s.downloadUrl.split('/').pop());
-  if (!tokens.length) { toast('Create the PowerPoints first.'); return; }
-  $('dlAllBtn').disabled = true;
-  try {
-    const r = await api('/api/download_all', {tokens, name: $('dlAllName').value});
-    if (r.ok) {
-      const a = document.createElement('a');
-      a.href = r.download; a.download = r.file;
-      document.body.appendChild(a); a.click(); a.remove();
-      toast(`Downloading ${r.file} (${r.count} PowerPoint${r.count === 1 ? '' : 's'}).`);
-    } else toast(r.error || "Couldn't build the zip.");
-  } catch (e) { toast('Server error building the zip.'); }
-  $('dlAllBtn').disabled = false;
-}
 
 function hasInput(s) { return (s.artist.trim() && s.title.trim()) || s.url.trim() || s.lyrics.trim(); }
 
@@ -578,12 +576,11 @@ async function createOne(s, i) {
     const r = await api('/api/create_one', {
       artist: s.artist, title: s.title, url: s.url, lyrics: s.lyrics,
       source: s.source, background: s.bg,
+      output_folder: $('outFolder').value,
     }, currentFetchCtrl.signal);
     currentFetchCtrl = null;
     if (r.ok) {
-      s.downloadUrl = r.download;
-      s.file = r.file;
-      setStatus(i, `Ready - tap Download below${r.source ? ' (lyrics from ' + r.source + ')' : ''}`, 'ok');
+      setStatus(i, `Saved: ${r.file}${r.source ? ' - lyrics from ' + r.source : ''}`, 'ok');
       return 'ok';
     }
     setStatus(i, r.error || 'Failed', 'err');
@@ -592,7 +589,7 @@ async function createOne(s, i) {
   } catch (e) {
     currentFetchCtrl = null;
     if (stopRequested || e.name === 'AbortError') {
-      setStatus(i, 'Stopped', 'err');
+      setStatus(i, 'Stopped (this song may still have been saved)', 'err');
       return 'stopped';
     }
     setStatus(i, 'Server error', 'err');
@@ -633,12 +630,11 @@ async function createAll() {
 
   $('createBtn').disabled = false;
   $('stopBtn').style.display = 'none';
-  const bits = [`${made} ready`];
+  const bits = [`${made} created`];
   if (failed) bits.push(`${failed} failed`);
   if (skipped) bits.push(`${skipped} stopped`);
   $('globalStatus').textContent = (stopRequested ? 'Stopped - ' : 'Done - ') + bits.join(', ') + '.';
-  toast((stopRequested ? 'Stopped: ' : 'Done: ') + bits.join(', ') +
-        (made ? '. Tap the green Download buttons.' : '.'));
+  toast((stopRequested ? 'Stopped: ' : 'Done: ') + bits.join(', ') + '.');
 }
 
 /* ---------- backgrounds manager ---------- */
@@ -666,6 +662,7 @@ async function saveSettings() {
     if (b.transform) transforms[b.name] = b.transform;
   }
   await api('/api/save_settings', {
+    output_folder: $('outFolder').value,
     background_colors: colors,
     background_selected: selected,
     background_transforms: transforms,
@@ -808,6 +805,8 @@ async function loadBackgrounds() {
     return;
   }
   try {
+    const st = await api('/api/settings');
+    if (st.ok) $('outFolder').value = st.output_folder;
     await loadBackgrounds();
   } catch (e) {
     $('fileWarn').style.display = 'block';

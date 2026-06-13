@@ -5,17 +5,15 @@ address like `https://lyrics-slides.onrender.com`. Open it in Safari at
 church, create the PowerPoint, and it downloads straight to your phone's
 Files app. Your Mac can be off.
 
-## Step 1 — Put this `cloud` folder on GitHub
+## Step 1 — Put this repo on GitHub
 
 1. Go to https://github.com and sign up (free) if you don't have an account.
 2. Click **+** (top right) → **New repository**. Name it `lyrics-slides`,
    set it to **Private**, click **Create repository**.
-3. On the repo page click **uploading an existing file**.
-4. In Finder, open this `cloud` folder, select **everything inside it**
-   (including the `background_images` folder) and drag it into the GitHub
-   upload box. Click **Commit changes**.
+3. Push this repository to GitHub. The Render cloud service lives at the repo
+   root, and the local desktop app lives in `desktop-version/`.
 
-> Never upload your `.env` file — the Genius token goes into Render in
+> Never upload your real `.env` file — the Genius token goes into Render in
 > Step 2 instead. (The `.gitignore` here excludes it anyway.)
 
 ## Step 2 — Deploy on Render (free)
@@ -59,5 +57,5 @@ Files app. Your Mac can be off.
   slide creation itself always works.
 - **The URL is public.** Anyone who has the exact link can use the app,
   so don't post it anywhere public.
-- Your original Mac app in the Creation folder is untouched and keeps
-  working as before.
+- The desktop app is included in `desktop-version/` and can be downloaded from
+  the same GitHub repo.
