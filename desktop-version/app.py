@@ -270,7 +270,7 @@ class Handler(BaseHTTPRequestHandler):
         song = fetch_song_for_request(data)
         if song is None:
             self._send_json({'ok': False,
-                             'error': core.LAST_ERROR or 'Lyrics not found.'})
+                             'error': core.LAST_ERROR or core.LYRICS_NOT_FOUND_MSG})
             return
         self._send_json({
             'ok': True,
@@ -326,7 +326,7 @@ class Handler(BaseHTTPRequestHandler):
             if song is None:
                 self._send_json({
                     'ok': False,
-                    'error': core.LAST_ERROR or 'Lyrics not found.',
+                    'error': core.LAST_ERROR or core.LYRICS_NOT_FOUND_MSG,
                     'needs_lyrics': True,  # UI offers the manual-paste editor
                 })
                 return

@@ -137,6 +137,11 @@
   a.dlbtn:hover { filter: brightness(1.08); }
   a.dlbtn:active { transform: scale(.98); }
 
+  .count-card, .inline-row { display: flex; gap: 8px; }
+  .count-card { align-items: center; gap: 12px; flex-wrap: wrap; }
+  .inline-row { align-items: stretch; }
+  .inline-row input { flex: 1; min-width: 0; }
+
   .bigbar { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
   .bigbar button.primary { padding: 12px 28px; font-size: 15px; border-radius: 11px; }
 
@@ -214,6 +219,81 @@
     vertical-align: -2px; margin-right: 6px; }
   @keyframes sp { to { transform: rotate(360deg); } }
 
+  @media (max-width: 640px) {
+    body { font-size: 15px; }
+    .wrap { padding: 20px 12px 96px; }
+    header { align-items: flex-start; margin-bottom: 18px; }
+    .mark { width: 36px; height: 36px; border-radius: 10px; font-size: 17px; }
+    header h1 { font-size: 18px; }
+    header .sub { font-size: 12.5px; line-height: 1.35; }
+    .card { padding: 16px; border-radius: 12px; margin-bottom: 12px; }
+    .card h2 { margin-bottom: 12px; }
+
+    input[type=text], input[type=number], textarea, select {
+      min-height: 44px; font-size: 16px; padding: 10px 12px;
+    }
+    details summary { min-height: 44px; display: flex; align-items: center; }
+    button, a.dlbtn { min-height: 44px; padding: 10px 14px; font-size: 15px; }
+    .inline-row { flex-direction: column; }
+    .count-card { align-items: flex-start; }
+    .count-card .hint { flex-basis: 100%; margin-top: 0; }
+    #songCount { width: 96px !important; }
+
+    .song-head { align-items: flex-start; flex-direction: column; gap: 6px; }
+    .song-status { text-align: left; max-width: 100%; }
+    .grid2 { gap: 12px; }
+    .bg-strip { margin-inline: -2px; padding: 4px 2px 12px; }
+    .bg-opt { width: 108px; }
+    .bg-opt img, .bg-opt .rand { height: 58px; }
+
+    .row-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .row-btns button, .row-btns a.dlbtn { width: 100%; text-align: center; }
+    .row-btns .hint, .row-btns .lyr-badge { grid-column: 1 / -1; }
+    .row-btns .danger[style*="margin-left:auto"] { margin-left: 0 !important; }
+    .bigbar { align-items: stretch; flex-direction: column; gap: 8px; }
+    .bigbar button.primary { width: 100%; padding: 12px 18px; }
+
+    .mgr-row {
+      display: grid; grid-template-columns: 64px 1fr auto;
+      align-items: center; gap: 8px; padding: 10px 0;
+    }
+    .mgr-row img { width: 64px; height: 38px; }
+    .mgr-row select { grid-column: 2 / 4; width: 100%; font-size: 16px; }
+    .mgr-row .nm { min-width: 0; }
+
+    .overlay { align-items: flex-end; padding: 8px; }
+    .modal {
+      width: 100%; max-height: calc(100dvh - 16px);
+      border-radius: 16px 16px 10px 10px; padding: 16px;
+    }
+    .modal .mrow { grid-template-columns: 1fr; gap: 8px; }
+    .modal textarea {
+      min-height: min(42dvh, 320px); font-size: 16px; white-space: pre-wrap;
+    }
+    .modal .mbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .modal .mbtns button { width: 100%; }
+    #mFetchBtn { grid-column: 1 / -1; margin-right: 0 !important; }
+    #adjStage { height: min(58vw, 300px); }
+    .adj-controls { flex-direction: column; gap: 10px; }
+    .adj-controls label { justify-content: space-between; }
+    .adj-controls input[type=range] { width: min(55vw, 190px); }
+
+    .toast {
+      left: 12px; right: 12px; bottom: 16px; transform: none;
+      text-align: center; padding: 10px 14px;
+    }
+    @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } }
+  }
+
+  @media (max-width: 420px) {
+    .wrap { padding-inline: 10px; }
+    header { gap: 10px; }
+    .card { padding: 14px; }
+    .row-btns { grid-template-columns: 1fr; }
+    .modal .mbtns { grid-template-columns: 1fr; }
+    .bg-opt { width: 102px; }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
       animation-duration: .01ms !important;
@@ -240,7 +320,7 @@
     <div class="hint">Open the app's web address instead.</div>
   </div>
 
-  <div class="card" style="display:flex; align-items:center; gap:12px; flex-wrap:wrap">
+  <div class="card count-card">
     <label style="font-weight:600">How many songs?</label>
     <input type="number" id="songCount" min="1" max="200" value="1"
            style="width:80px; text-align:center"
@@ -250,7 +330,7 @@
 
   <div class="card">
     <h2>Import from a Spotify playlist</h2>
-    <div style="display:flex; gap:8px">
+    <div class="inline-row">
       <input type="text" id="spotifyLink" placeholder="https://open.spotify.com/playlist/..."
              style="flex:1" onkeydown="if(event.key==='Enter')importSpotify()">
       <button onclick="importSpotify()" id="spotifyBtn">Import songs</button>
@@ -283,7 +363,7 @@
 
   <div class="card" id="dlAllBar" style="display:none; margin-top:14px">
     <h2>Download everything</h2>
-    <div style="display:flex; gap:8px; flex-wrap:wrap">
+    <div class="inline-row">
       <input type="text" id="dlAllName" placeholder="Name the file, e.g. Sunday Worship"
              style="flex:1; min-width:180px" onkeydown="if(event.key==='Enter')downloadAll()">
       <button class="primary" onclick="downloadAll()" id="dlAllBtn">&#11015;&#65039; Download all (.zip)</button>
@@ -428,6 +508,7 @@ function render() {
       </div>
       <div class="row-btns">
         <button onclick="openLyricsModal(${i})">${s.lyrics ? 'Edit lyrics' : 'Paste lyrics'}</button>
+        <button class="primary" onclick="createSong(${i})">Create this song</button>
         ${s.statusCls === 'err' ? `<button onclick="retrySong(${i})">&#8635; Retry</button>` : ''}
         ${s.lyrics ? `<span class="lyr-badge">&#10003; Lyrics ready${s.source ? ' (' + esc(s.source) + ')' : ''}</span>
                       <button onclick="clearLyrics(${i})">Clear</button>` : ''}
@@ -533,7 +614,7 @@ async function fetchIntoModal() {
       $('mSrc').textContent = 'Fetched from ' + r.source + ' - check and edit freely.';
       songs[i]._fetchedSource = r.source;
     } else {
-      $('mSrc').textContent = (r.error || 'Lyrics not found.') + ' Paste them manually below.';
+      $('mSrc').textContent = r.error || 'Unable to find lyrics. Please try again or paste them manually.';
     }
   } catch (e) {
     $('mSrc').textContent = 'Server error while fetching lyrics.';
@@ -601,14 +682,29 @@ async function createOne(s, i) {
 }
 
 async function retrySong(i) {
+  return createSong(i, 'Still failing - check the error on the song row.');
+}
+
+async function createSong(i, failToast) {
   if ($('createBtn').disabled) return;   // a batch is already running
   if (!hasInput(songs[i])) { toast('Fill in the song first.'); return; }
   stopRequested = false;
   $('createBtn').disabled = true;
-  await saveSettings();
-  const res = await createOne(songs[i], i);
-  $('createBtn').disabled = false;
-  if (res !== 'ok') toast('Still failing - check the error on the song row.');
+  $('stopBtn').style.display = '';
+  $('stopBtn').disabled = false;
+  $('globalStatus').textContent = `Creating song ${i + 1}...`;
+  let res = 'fail';
+  try {
+    await saveSettings();
+    res = await createOne(songs[i], i);
+  } finally {
+    $('createBtn').disabled = false;
+    $('stopBtn').style.display = 'none';
+  }
+  $('globalStatus').textContent = res === 'ok'
+      ? `Song ${i + 1} ready.`
+      : `Song ${i + 1} did not finish.`;
+  if (res !== 'ok') toast(failToast || 'Check the error on the song row.');
 }
 
 async function createAll() {

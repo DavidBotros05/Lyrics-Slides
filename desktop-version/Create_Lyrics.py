@@ -40,6 +40,8 @@ BROWSER_HEADERS = {
 
 # Human-readable reason the most recent fetch failed (shown to the user).
 LAST_ERROR = ''
+LYRICS_NOT_FOUND_MSG = (
+    "Unable to find lyrics. Please try again or paste them manually.")
 
 
 class AZLyricsBlockedError(RuntimeError):
@@ -707,24 +709,45 @@ def fetch_song(artist: str = '', title: str = '',
         if song:
             return song
 
-    # Fall back to scraping a pasted link directly.
+    # Fall back to scraping a pasted link directly. Any Genius miss/error moves
+    # on to AZLyrics instead of becoming the final user-facing error.
     if gen:
         song = fetch_from_genius(artist, title, url=gen)
         if song:
             return song
+        if az:
+            song = fetch_from_azlyrics(artist, title, url=az)
+            if song:
+                return song
+        else:
+            az_search_title = title or _title_from_url(gen)
+            if az_search_title:
+                song = fetch_from_azlyrics(artist, az_search_title)
+                if song:
+                    return song
+        LAST_ERROR = LYRICS_NOT_FOUND_MSG
+        return None
+
     if az:
         song = fetch_from_azlyrics(artist, title, url=az)
         if song:
             return song
+        LAST_ERROR = LYRICS_NOT_FOUND_MSG
+        return None
 
     # Last resort: Genius/AZLyrics search by name (needs both fields).
     if artist and title:
-        song = fetch_from_genius(artist, title) or fetch_from_azlyrics(artist, title)
+        song = fetch_from_genius(artist, title)
+        if song:
+            return song
+        song = fetch_from_azlyrics(artist, title)
         if song:
             return song
 
     if not LAST_ERROR:
         LAST_ERROR = "Enter a song title (artist optional), or paste a Genius/AZLyrics link."
+    elif LAST_ERROR != "Enter a song title (artist optional), or paste a Genius/AZLyrics link.":
+        LAST_ERROR = LYRICS_NOT_FOUND_MSG
     return None
 
 
