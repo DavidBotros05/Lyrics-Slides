@@ -72,6 +72,7 @@
   .song-status.busy { color: var(--warn); background: var(--warn-soft); }
 
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grid2 > div { min-width: 0; }
   .full { grid-column: 1 / -1; }
   @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
   label.fld { display: block; font-size: 12.5px; font-weight: 500;
@@ -79,7 +80,8 @@
   input[type=text], input[type=number], textarea, select {
     width: 100%; background: var(--panel2); color: var(--text);
     border: 1px solid var(--border); border-radius: 9px;
-    padding: 9px 12px; font-size: 14px; font-family: inherit; outline: none;
+    padding: 9px 12px; font-size: 16px; font-family: inherit; outline: none;
+    max-width: 100%;
     transition: border-color .15s var(--ease), box-shadow .15s var(--ease);
   }
   input::placeholder, textarea::placeholder { color: var(--muted); opacity: .75; }
@@ -141,6 +143,7 @@
   .count-card { align-items: center; gap: 12px; flex-wrap: wrap; }
   .inline-row { align-items: stretch; }
   .inline-row input { flex: 1; min-width: 0; }
+  .card, .song-head, .row-btns, .inline-row { min-width: 0; }
 
   .bigbar { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
   .bigbar button.primary { padding: 12px 28px; font-size: 15px; border-radius: 11px; }
