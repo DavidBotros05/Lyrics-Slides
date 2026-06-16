@@ -720,6 +720,7 @@ async function createAll() {
   $('stopBtn').style.display = '';
   $('stopBtn').disabled = false;
   let made = 0, failed = 0, skipped = 0;
+  const moveToEnd = new Set();
 
   for (const [s, i] of todo) {
     if (stopRequested) { skipped++; setStatus(i, 'Skipped (stopped)', ''); continue; }
@@ -727,7 +728,13 @@ async function createAll() {
     const res = await createOne(s, i);
     if (res === 'ok') made++;
     else if (res === 'stopped') skipped++;
-    else failed++;
+    else { failed++; moveToEnd.add(s); }
+  }
+
+  if (moveToEnd.size) {
+    songs = songs.filter(s => !moveToEnd.has(s))
+                 .concat(songs.filter(s => moveToEnd.has(s)));
+    render();
   }
 
   $('createBtn').disabled = false;

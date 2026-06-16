@@ -206,6 +206,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/settings':
             settings = core.load_app_settings()
+            by_folder = settings.get('previous_powerpoints_actions_by_folder')
+            if not isinstance(by_folder, dict):
+                by_folder = {}
+            clean_by_folder = {
+                str(folder): core.clean_previous_powerpoints_action(action)
+                for folder, action in by_folder.items()
+                if isinstance(folder, str)
+            }
             self._send_json({
                 'ok': True,
                 'output_folder': settings.get('output_folder', CUR_DIR) or CUR_DIR,
@@ -213,6 +221,7 @@ class Handler(BaseHTTPRequestHandler):
                 'previous_powerpoints_action': (
                     core.clean_previous_powerpoints_action(
                         settings.get('previous_powerpoints_action'))),
+                'previous_powerpoints_actions_by_folder': clean_by_folder,
             })
             return
 
@@ -436,6 +445,14 @@ class Handler(BaseHTTPRequestHandler):
             settings['previous_powerpoints_action'] = (
                 core.clean_previous_powerpoints_action(
                     data.get('previous_powerpoints_action')))
+        if isinstance(data.get('previous_powerpoints_actions_by_folder'), dict):
+            clean_by_folder = {}
+            for folder, action in data['previous_powerpoints_actions_by_folder'].items():
+                if not isinstance(folder, str) or not folder.strip():
+                    continue
+                clean_by_folder[folder.strip()] = (
+                    core.clean_previous_powerpoints_action(action))
+            settings['previous_powerpoints_actions_by_folder'] = clean_by_folder
         if isinstance(data.get('background_colors'), dict):
             settings['background_colors'] = {
                 str(k): (v if v in ('Auto', 'Black', 'White') else 'Auto')

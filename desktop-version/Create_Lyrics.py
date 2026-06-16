@@ -448,11 +448,6 @@ def resolve_existing_song_from_all_songs(artist: str, title: str, url: str,
     candidates = _library_candidates(title, url)
     if not candidates:
         return {'status': 'none'}
-    if len(candidates) > 1:
-        return {
-            'status': 'ambiguous',
-            'choices': [_public_choice(c) for c in candidates],
-        }
 
     requested_artist_key = _song_lookup_key(artist)
     distinct_artist_keys = {
@@ -463,7 +458,14 @@ def resolve_existing_song_from_all_songs(artist: str, title: str, url: str,
         if requested_artist_key and c.get('artist_key') == requested_artist_key
     ]
 
-    if len(distinct_artist_keys) > 1:
+    if len(exact_matches) == 1:
+        return {
+            'status': 'placed',
+            'result': place_existing_song_in_output(
+                exact_matches[0]['path'], output_base, storage_mode),
+        }
+
+    if len(candidates) > 1 or len(distinct_artist_keys) > 1:
         return {
             'status': 'ambiguous',
             'choices': [_public_choice(c) for c in candidates],

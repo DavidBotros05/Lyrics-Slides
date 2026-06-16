@@ -342,7 +342,8 @@
     <h2>Output</h2>
     <label class="fld">Save PowerPoints to</label>
     <div class="inline-row">
-      <input type="text" id="outFolder" placeholder="/Users/you/Desktop" style="flex:1">
+      <input type="text" id="outFolder" placeholder="/Users/you/Desktop" style="flex:1"
+             onchange="applyPreviousActionForFolder(); saveSettings(false)">
       <button onclick="browseFolder()" id="browseBtn">Browse&hellip;</button>
     </div>
     <label class="fld" style="margin-top:12px">When a PowerPoint is created</label>
@@ -357,6 +358,10 @@
       <option value="delete">Delete them</option>
       <option value="move_to_all_songs">Move them to All Songs</option>
     </select>
+    <div class="row-btns">
+      <button onclick="savePreviousActionForFolder()">Save for this folder</button>
+      <span class="hint" id="previousFolderStatus"></span>
+    </div>
   </div>
 
   <div class="card">
@@ -437,6 +442,7 @@
 let songs = [];          // {artist,title,url,lyrics,source,bg,status,statusCls}
 let backgrounds = [];    // {name,color_mode,selected}
 let modalIdx = -1;
+let previousPowerpointsByFolder = {};
 
 const $ = id => document.getElementById(id);
 
@@ -496,11 +502,39 @@ async function browseFolder() {
   $('browseBtn').disabled = true;
   try {
     const r = await api('/api/pick_folder', {});
-    if (r.ok && r.path) { $('outFolder').value = r.path; saveSettings(); }
+    if (r.ok && r.path) {
+      $('outFolder').value = r.path;
+      applyPreviousActionForFolder();
+      saveSettings(false);
+    }
     else if (r.ok && r.cancelled) { /* user closed the dialog */ }
     else toast(r.error || "Couldn't open the folder dialog.");
   } catch (e) { toast('Server error opening the dialog.'); }
   $('browseBtn').disabled = false;
+}
+
+function outputFolderKey() {
+  return $('outFolder').value.trim();
+}
+
+function applyPreviousActionForFolder() {
+  const key = outputFolderKey();
+  const status = $('previousFolderStatus');
+  if (key && previousPowerpointsByFolder[key]) {
+    $('previousPowerpointsAction').value = previousPowerpointsByFolder[key];
+    if (status) status.textContent = 'Using saved setting for this folder.';
+  } else if (status) {
+    status.textContent = '';
+  }
+}
+
+async function savePreviousActionForFolder() {
+  const key = outputFolderKey();
+  if (!key) { toast('Choose an output folder first.'); return; }
+  previousPowerpointsByFolder[key] = $('previousPowerpointsAction').value;
+  await saveSettings(false);
+  $('previousFolderStatus').textContent = 'Saved for this folder.';
+  toast('Previous-session setting saved for this folder.');
 }
 
 function esc(s) {
@@ -783,6 +817,7 @@ async function createAll() {
   $('stopBtn').style.display = '';
   $('stopBtn').disabled = false;
   let made = 0, failed = 0, skipped = 0, choices = 0;
+  const moveToEnd = new Set();
 
   for (const [s, i] of todo) {
     if (stopRequested) { skipped++; setStatus(i, 'Skipped (stopped)', ''); continue; }
@@ -790,8 +825,14 @@ async function createAll() {
     const res = await createOne(s, i);
     if (res === 'ok') made++;
     else if (res === 'stopped') skipped++;
-    else if (res === 'choice') choices++;
-    else failed++;
+    else if (res === 'choice') { choices++; moveToEnd.add(s); }
+    else { failed++; moveToEnd.add(s); }
+  }
+
+  if (moveToEnd.size) {
+    songs = songs.filter(s => !moveToEnd.has(s))
+                 .concat(songs.filter(s => moveToEnd.has(s)));
+    render();
   }
 
   $('createBtn').disabled = false;
@@ -821,21 +862,25 @@ function renderMgr() {
     </div>`).join('') || '<div class="hint">No images yet - add one below.</div>';
 }
 
-async function saveSettings() {
+async function saveSettings(saveGlobalPreviousAction = true) {
   const colors = {}, selected = {}, transforms = {};
   for (const b of backgrounds) {
     colors[b.name] = b.color_mode;
     selected[b.name] = b.selected;
     if (b.transform) transforms[b.name] = b.transform;
   }
-  await api('/api/save_settings', {
+  const payload = {
     output_folder: $('outFolder').value,
     storage_mode: $('storageMode').value,
-    previous_powerpoints_action: $('previousPowerpointsAction').value,
+    previous_powerpoints_actions_by_folder: previousPowerpointsByFolder,
     background_colors: colors,
     background_selected: selected,
     background_transforms: transforms,
-  });
+  };
+  if (saveGlobalPreviousAction) {
+    payload.previous_powerpoints_action = $('previousPowerpointsAction').value;
+  }
+  await api('/api/save_settings', payload);
 }
 
 /* ---------- background position/stretch editor ---------- */
@@ -979,6 +1024,10 @@ async function loadBackgrounds() {
     if (st.ok && st.storage_mode) $('storageMode').value = st.storage_mode;
     if (st.ok && st.previous_powerpoints_action) {
       $('previousPowerpointsAction').value = st.previous_powerpoints_action;
+    }
+    if (st.ok && st.previous_powerpoints_actions_by_folder) {
+      previousPowerpointsByFolder = st.previous_powerpoints_actions_by_folder;
+      applyPreviousActionForFolder();
     }
     await loadBackgrounds();
   } catch (e) {
