@@ -351,6 +351,12 @@
       <option value="both_copies">Create copies in both folders</option>
       <option value="all_songs_alias">Create it in All Songs and link it here</option>
     </select>
+    <label class="fld" style="margin-top:12px">Previous-session PowerPoints in this folder</label>
+    <select id="previousPowerpointsAction" onchange="saveSettings()">
+      <option value="keep">Keep them</option>
+      <option value="delete">Delete them</option>
+      <option value="move_to_all_songs">Move them to All Songs</option>
+    </select>
   </div>
 
   <div class="card">
@@ -678,6 +684,7 @@ async function createOne(s, i) {
       source: s.source, background: s.bg,
       output_folder: $('outFolder').value,
       storage_mode: $('storageMode').value,
+      previous_powerpoints_action: $('previousPowerpointsAction').value,
       library_path: s._libraryPath || '',
       skip_library: !!s._skipLibrary,
     }, currentFetchCtrl.signal);
@@ -824,6 +831,7 @@ async function saveSettings() {
   await api('/api/save_settings', {
     output_folder: $('outFolder').value,
     storage_mode: $('storageMode').value,
+    previous_powerpoints_action: $('previousPowerpointsAction').value,
     background_colors: colors,
     background_selected: selected,
     background_transforms: transforms,
@@ -969,6 +977,9 @@ async function loadBackgrounds() {
     const st = await api('/api/settings');
     if (st.ok) $('outFolder').value = st.output_folder;
     if (st.ok && st.storage_mode) $('storageMode').value = st.storage_mode;
+    if (st.ok && st.previous_powerpoints_action) {
+      $('previousPowerpointsAction').value = st.previous_powerpoints_action;
+    }
     await loadBackgrounds();
   } catch (e) {
     $('fileWarn').style.display = 'block';

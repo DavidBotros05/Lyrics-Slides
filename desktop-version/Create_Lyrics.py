@@ -111,9 +111,18 @@ STORAGE_MODES = {
     STORAGE_ALL_SONGS_ALIAS,
 }
 DEFAULT_STORAGE_MODE = STORAGE_ALL_SONGS_ALIAS
+PREVIOUS_POWERPOINTS_KEEP = 'keep'
+PREVIOUS_POWERPOINTS_DELETE = 'delete'
+PREVIOUS_POWERPOINTS_MOVE = 'move_to_all_songs'
+PREVIOUS_POWERPOINTS_ACTIONS = {
+    PREVIOUS_POWERPOINTS_KEEP,
+    PREVIOUS_POWERPOINTS_DELETE,
+    PREVIOUS_POWERPOINTS_MOVE,
+}
+DEFAULT_PREVIOUS_POWERPOINTS_ACTION = PREVIOUS_POWERPOINTS_KEEP
 
 _ALL_SONGS_INDEX: dict[str, list[str]] | None = None
-_PREPARED_OUTPUT_FOLDERS: set[str] = set()
+_PREPARED_OUTPUT_FOLDERS: set[tuple[str, str]] = set()
 
 
 def load_app_settings() -> dict:
@@ -144,6 +153,12 @@ def _resolved_path(path: str) -> str:
 def clean_storage_mode(mode: str | None) -> str:
     """Return a supported PowerPoint storage mode."""
     return mode if mode in STORAGE_MODES else DEFAULT_STORAGE_MODE
+
+
+def clean_previous_powerpoints_action(action: str | None) -> str:
+    """Return a supported action for old PowerPoints in the output folder."""
+    return (action if action in PREVIOUS_POWERPOINTS_ACTIONS
+            else DEFAULT_PREVIOUS_POWERPOINTS_ACTION)
 
 
 def _path_is_inside(path: str, folder: str) -> bool:
@@ -217,39 +232,52 @@ def _invalidate_all_songs_index() -> None:
     _ALL_SONGS_INDEX = None
 
 
-def prepare_selected_output_folder(output_base: str, storage_mode: str | None = None) -> int:
-    """Prepare existing output PowerPoints according to the storage mode.
+def prepare_selected_output_folder(output_base: str,
+                                   previous_action: str | None = None) -> int:
+    """Handle previous-session PowerPoints in the selected output folder.
 
-    Output-only leaves them alone. Both-copies stores a library copy. Alias mode
-    stores the library copy and replaces the output file with a symlink alias.
+    Keep leaves them alone. Delete removes real files and symlink aliases. Move
+    sends real files to All Songs using library versioning, then removes them;
+    aliases are removed because their real deck is already in All Songs.
     """
-    mode = clean_storage_mode(storage_mode)
-    if mode == STORAGE_OUTPUT_ONLY:
+    action = clean_previous_powerpoints_action(previous_action)
+    if action == PREVIOUS_POWERPOINTS_KEEP:
         return 0
 
     output_dir = _resolved_path(output_base)
-    if output_dir in _PREPARED_OUTPUT_FOLDERS:
+    prepared_key = (output_dir, action)
+    if prepared_key in _PREPARED_OUTPUT_FOLDERS:
         return 0
     if _path_is_inside(output_dir, ALL_SONGS_DIR):
-        _PREPARED_OUTPUT_FOLDERS.add(output_dir)
+        _PREPARED_OUTPUT_FOLDERS.add(prepared_key)
         return 0
 
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(ALL_SONGS_DIR, exist_ok=True)
+    if action == PREVIOUS_POWERPOINTS_MOVE:
+        os.makedirs(ALL_SONGS_DIR, exist_ok=True)
 
-    linked = 0
+    changed = 0
     for entry in os.scandir(output_dir):
-        if entry.is_symlink() or not entry.is_file() or not _is_powerpoint_file(entry.name):
+        if not _is_powerpoint_file(entry.name):
             continue
-        title, artist = _presentation_meta(entry.path, Path(entry.name).stem, '')
-        library_path = store_presentation_in_all_songs(entry.path, title, artist)
-        if mode == STORAGE_ALL_SONGS_ALIAS:
-            _alias_to_output(
-                library_path, output_dir, filename=entry.name, replace_path=entry.path)
-        linked += 1
+        if entry.is_symlink():
+            os.remove(entry.path)
+            changed += 1
+            continue
+        if not entry.is_file():
+            continue
+        if action == PREVIOUS_POWERPOINTS_DELETE:
+            os.remove(entry.path)
+            changed += 1
+            continue
 
-    _PREPARED_OUTPUT_FOLDERS.add(output_dir)
-    return linked
+        title, artist = _presentation_meta(entry.path, Path(entry.name).stem, '')
+        store_presentation_in_all_songs(entry.path, title, artist)
+        os.remove(entry.path)
+        changed += 1
+
+    _PREPARED_OUTPUT_FOLDERS.add(prepared_key)
+    return changed
 
 
 def _song_lookup_key(value: str) -> str:

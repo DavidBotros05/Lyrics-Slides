@@ -210,6 +210,9 @@ class Handler(BaseHTTPRequestHandler):
                 'ok': True,
                 'output_folder': settings.get('output_folder', CUR_DIR) or CUR_DIR,
                 'storage_mode': core.clean_storage_mode(settings.get('storage_mode')),
+                'previous_powerpoints_action': (
+                    core.clean_previous_powerpoints_action(
+                        settings.get('previous_powerpoints_action'))),
             })
             return
 
@@ -303,9 +306,11 @@ class Handler(BaseHTTPRequestHandler):
         output_folder = (data.get('output_folder') or '').strip()
         output_folder = os.path.expanduser(output_folder) or CUR_DIR
         storage_mode = core.clean_storage_mode(data.get('storage_mode'))
+        previous_action = core.clean_previous_powerpoints_action(
+            data.get('previous_powerpoints_action'))
         try:
             os.makedirs(output_folder, exist_ok=True)
-            core.prepare_selected_output_folder(output_folder, storage_mode)
+            core.prepare_selected_output_folder(output_folder, previous_action)
         except OSError as exc:
             self._send_json({'ok': False,
                              'error': f"Can't use that output folder ({exc})."})
@@ -427,6 +432,10 @@ class Handler(BaseHTTPRequestHandler):
             settings['output_folder'] = data['output_folder'].strip()
         if isinstance(data.get('storage_mode'), str):
             settings['storage_mode'] = core.clean_storage_mode(data.get('storage_mode'))
+        if isinstance(data.get('previous_powerpoints_action'), str):
+            settings['previous_powerpoints_action'] = (
+                core.clean_previous_powerpoints_action(
+                    data.get('previous_powerpoints_action')))
         if isinstance(data.get('background_colors'), dict):
             settings['background_colors'] = {
                 str(k): (v if v in ('Auto', 'Black', 'White') else 'Auto')
