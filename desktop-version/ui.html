@@ -345,6 +345,12 @@
       <input type="text" id="outFolder" placeholder="/Users/you/Desktop" style="flex:1">
       <button onclick="browseFolder()" id="browseBtn">Browse&hellip;</button>
     </div>
+    <label class="fld" style="margin-top:12px">When a PowerPoint is created</label>
+    <select id="storageMode" onchange="saveSettings()">
+      <option value="output_only">Only create it in the chosen folder</option>
+      <option value="both_copies">Create copies in both folders</option>
+      <option value="all_songs_alias">Create it in All Songs and link it here</option>
+    </select>
   </div>
 
   <div class="card">
@@ -462,7 +468,7 @@ async function api(path, body, signal) {
 
 function newSong() {
   return {artist:'', title:'', url:'', lyrics:'', source:'', bg:'random',
-          status:'', statusCls:''};
+          status:'', statusCls:'', libraryChoices:null};
 }
 
 function setSongCount(n) {
@@ -510,6 +516,15 @@ function bgStrip(i) {
 
 function pickBg(i, name) { songs[i].bg = name; render(); }
 
+function libraryChoiceButtons(i, s) {
+  if (!s.libraryChoices || !s.libraryChoices.length) return '';
+  const choices = s.libraryChoices.map((c, j) => {
+    const label = `${c.artist || 'Unknown artist'} - ${c.file || c.title}`;
+    return `<button onclick="chooseLibrarySong(${i},${j})">Use ${esc(label)}</button>`;
+  }).join('');
+  return `${choices}<button onclick="fetchNewVersion(${i})">Fetch new version</button>`;
+}
+
 function render() {
   const host = $('songs');
   host.innerHTML = songs.map((s, i) => `
@@ -536,6 +551,7 @@ function render() {
       <div class="row-btns">
         <button onclick="openLyricsModal(${i})">${s.lyrics ? 'Edit lyrics' : 'Paste lyrics'}</button>
         <button class="primary" onclick="createSong(${i})">Create this song</button>
+        ${libraryChoiceButtons(i, s)}
         ${s.statusCls === 'err' ? `<button onclick="retrySong(${i})">&#8635; Retry</button>` : ''}
         ${s.lyrics ? `<span class="lyr-badge">&#10003; Lyrics ready${s.source ? ' (' + esc(s.source) + ')' : ''}</span>
                       <button onclick="clearLyrics(${i})">Clear</button>` : ''}
@@ -661,11 +677,30 @@ async function createOne(s, i) {
       artist: s.artist, title: s.title, url: s.url, lyrics: s.lyrics,
       source: s.source, background: s.bg,
       output_folder: $('outFolder').value,
+      storage_mode: $('storageMode').value,
+      library_path: s._libraryPath || '',
+      skip_library: !!s._skipLibrary,
     }, currentFetchCtrl.signal);
     currentFetchCtrl = null;
     if (r.ok) {
-      setStatus(i, `Saved: ${r.file}${r.source ? ' - lyrics from ' + r.source : ''}`, 'ok');
+      const suffix = r.source === 'All Songs library'
+          ? (r.delivery === 'linked'
+              ? ' - linked from All Songs library'
+              : ' - copied from All Songs library')
+          : (r.source ? ' - lyrics from ' + r.source : '');
+      s.libraryChoices = null;
+      s._libraryPath = '';
+      s._skipLibrary = false;
+      setStatus(i, `Saved: ${r.file}${suffix}`, 'ok');
       return 'ok';
+    }
+    if (r.needs_choice) {
+      s.libraryChoices = r.choices || [];
+      s._libraryPath = '';
+      s._skipLibrary = false;
+      setStatus(i, 'Choose a saved version, or fetch a new one', 'busy');
+      toast(`Song ${i + 1}: choose a saved version or fetch a new one.`);
+      return 'choice';
     }
     setStatus(i, r.error || 'Failed', 'err');
     if (r.needs_lyrics) toast(`Song ${i + 1}: not found - use "Paste lyrics" to add them manually.`);
@@ -683,6 +718,30 @@ async function createOne(s, i) {
 
 async function retrySong(i) {
   return createSong(i, 'Still failing - check the error on the song row.');
+}
+
+async function chooseLibrarySong(i, choiceIdx) {
+  if ($('createBtn').disabled) {
+    toast('The batch is still running. Choose after it finishes.');
+    return;
+  }
+  const choice = songs[i].libraryChoices && songs[i].libraryChoices[choiceIdx];
+  if (!choice) return;
+  songs[i]._libraryPath = choice.path;
+  songs[i]._skipLibrary = false;
+  songs[i].libraryChoices = null;
+  await createSong(i);
+}
+
+async function fetchNewVersion(i) {
+  if ($('createBtn').disabled) {
+    toast('The batch is still running. Choose after it finishes.');
+    return;
+  }
+  songs[i]._libraryPath = '';
+  songs[i]._skipLibrary = true;
+  songs[i].libraryChoices = null;
+  await createSong(i);
 }
 
 async function createSong(i, failToast) {
@@ -716,14 +775,15 @@ async function createAll() {
   $('createBtn').disabled = true;
   $('stopBtn').style.display = '';
   $('stopBtn').disabled = false;
-  let made = 0, failed = 0, skipped = 0;
+  let made = 0, failed = 0, skipped = 0, choices = 0;
 
   for (const [s, i] of todo) {
     if (stopRequested) { skipped++; setStatus(i, 'Skipped (stopped)', ''); continue; }
-    $('globalStatus').textContent = `Creating ${made + failed + 1} of ${todo.length}...`;
+    $('globalStatus').textContent = `Creating ${made + failed + skipped + choices + 1} of ${todo.length}...`;
     const res = await createOne(s, i);
     if (res === 'ok') made++;
     else if (res === 'stopped') skipped++;
+    else if (res === 'choice') choices++;
     else failed++;
   }
 
@@ -732,6 +792,7 @@ async function createAll() {
   const bits = [`${made} created`];
   if (failed) bits.push(`${failed} failed`);
   if (skipped) bits.push(`${skipped} stopped`);
+  if (choices) bits.push(`${choices} need a choice`);
   $('globalStatus').textContent = (stopRequested ? 'Stopped - ' : 'Done - ') + bits.join(', ') + '.';
   toast((stopRequested ? 'Stopped: ' : 'Done: ') + bits.join(', ') + '.');
 }
@@ -762,6 +823,7 @@ async function saveSettings() {
   }
   await api('/api/save_settings', {
     output_folder: $('outFolder').value,
+    storage_mode: $('storageMode').value,
     background_colors: colors,
     background_selected: selected,
     background_transforms: transforms,
@@ -906,6 +968,7 @@ async function loadBackgrounds() {
   try {
     const st = await api('/api/settings');
     if (st.ok) $('outFolder').value = st.output_folder;
+    if (st.ok && st.storage_mode) $('storageMode').value = st.storage_mode;
     await loadBackgrounds();
   } catch (e) {
     $('fileWarn').style.display = 'block';

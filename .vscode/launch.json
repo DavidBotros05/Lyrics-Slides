@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Desktop Lyrics Slides",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/desktop-version/app.py",
+      "cwd": "${workspaceFolder}/desktop-version",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}

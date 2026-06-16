@@ -93,6 +93,28 @@ except ImportError:
 GENIUS_TOKEN = os.environ.get('GENIUS_ACCESS_TOKEN', '')
 SETTINGS_FILE = os.path.join(CUR_DIR, 'lyrics_slides_settings.json')
 
+# ---- song-library workflow -------------------------------------------------
+# Edit these paths if your weekly folder or permanent song library moves.
+THIS_SUNDAY_DIR = '/Users/david/Desktop/ThisSunday'
+ALL_SONGS_DIR = (
+    '/Users/david/Library/Mobile Documents/com~apple~CloudDocs/'
+    'Church/Worship/All Songs'
+)
+POWERPOINT_EXTS = ('.ppt', '.pptx', '.pptm', '.ppsx', '.potx')
+REUSABLE_SONG_EXTS = ('.pptx',)
+STORAGE_OUTPUT_ONLY = 'output_only'
+STORAGE_BOTH_COPIES = 'both_copies'
+STORAGE_ALL_SONGS_ALIAS = 'all_songs_alias'
+STORAGE_MODES = {
+    STORAGE_OUTPUT_ONLY,
+    STORAGE_BOTH_COPIES,
+    STORAGE_ALL_SONGS_ALIAS,
+}
+DEFAULT_STORAGE_MODE = STORAGE_ALL_SONGS_ALIAS
+
+_ALL_SONGS_INDEX: dict[str, list[str]] | None = None
+_PREPARED_OUTPUT_FOLDERS: set[str] = set()
+
 
 def load_app_settings() -> dict:
     """Load saved GUI choices like output folder and background color modes."""
@@ -112,6 +134,364 @@ def save_app_settings(settings: dict) -> None:
             json.dump(settings, f, indent=2, sort_keys=True)
     except OSError:
         pass
+
+
+def _resolved_path(path: str) -> str:
+    """Normalized absolute path for comparing user-selected folders."""
+    return str(Path(os.path.expanduser(path or '')).resolve(strict=False))
+
+
+def clean_storage_mode(mode: str | None) -> str:
+    """Return a supported PowerPoint storage mode."""
+    return mode if mode in STORAGE_MODES else DEFAULT_STORAGE_MODE
+
+
+def _path_is_inside(path: str, folder: str) -> bool:
+    """True when `path` is `folder` or inside it."""
+    child = Path(_resolved_path(path))
+    parent = Path(_resolved_path(folder))
+    return child == parent or parent in child.parents
+
+
+def _is_powerpoint_file(name: str) -> bool:
+    return name.lower().endswith(POWERPOINT_EXTS)
+
+
+def _unique_path(folder: str, filename: str) -> str:
+    """Return a non-overwriting path in `folder` for `filename`."""
+    base = Path(filename).stem
+    suffix = Path(filename).suffix
+    candidate = os.path.join(folder, filename)
+    n = 2
+    while os.path.lexists(candidate):
+        candidate = os.path.join(folder, f'{base} {n}{suffix}')
+        n += 1
+    return candidate
+
+
+def _same_symlink_target(link_path: str, target_path: str) -> bool:
+    """True when `link_path` is already a symlink to `target_path`."""
+    try:
+        if not os.path.islink(link_path):
+            return False
+        current = os.readlink(link_path)
+        if not os.path.isabs(current):
+            current = os.path.join(os.path.dirname(link_path), current)
+        return _resolved_path(current) == _resolved_path(target_path)
+    except OSError:
+        return False
+
+
+def _write_symlink(link_path: str, target_path: str, replace: bool = False) -> str:
+    """Create or replace a filesystem alias to an All Songs deck."""
+    os.makedirs(os.path.dirname(link_path), exist_ok=True)
+    if _same_symlink_target(link_path, target_path):
+        return link_path
+    if os.path.lexists(link_path) and not replace:
+        link_path = _unique_path(os.path.dirname(link_path), os.path.basename(link_path))
+
+    if replace:
+        tmp_link = _unique_path(
+            os.path.dirname(link_path), f'.{os.path.basename(link_path)}.link')
+        os.symlink(target_path, tmp_link)
+        os.replace(tmp_link, link_path)
+    else:
+        os.symlink(target_path, link_path)
+    return link_path
+
+
+def _alias_to_output(library_path: str, output_base: str,
+                     filename: str | None = None,
+                     replace_path: str | None = None) -> str:
+    """Link the chosen output folder to the canonical All Songs deck."""
+    if _path_is_inside(output_base, ALL_SONGS_DIR):
+        return library_path
+    link_path = replace_path or os.path.join(
+        output_base, filename or os.path.basename(library_path))
+    return _write_symlink(
+        link_path, library_path, replace=replace_path is not None)
+
+
+def _invalidate_all_songs_index() -> None:
+    global _ALL_SONGS_INDEX
+    _ALL_SONGS_INDEX = None
+
+
+def prepare_selected_output_folder(output_base: str, storage_mode: str | None = None) -> int:
+    """Prepare existing output PowerPoints according to the storage mode.
+
+    Output-only leaves them alone. Both-copies stores a library copy. Alias mode
+    stores the library copy and replaces the output file with a symlink alias.
+    """
+    mode = clean_storage_mode(storage_mode)
+    if mode == STORAGE_OUTPUT_ONLY:
+        return 0
+
+    output_dir = _resolved_path(output_base)
+    if output_dir in _PREPARED_OUTPUT_FOLDERS:
+        return 0
+    if _path_is_inside(output_dir, ALL_SONGS_DIR):
+        _PREPARED_OUTPUT_FOLDERS.add(output_dir)
+        return 0
+
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(ALL_SONGS_DIR, exist_ok=True)
+
+    linked = 0
+    for entry in os.scandir(output_dir):
+        if entry.is_symlink() or not entry.is_file() or not _is_powerpoint_file(entry.name):
+            continue
+        title, artist = _presentation_meta(entry.path, Path(entry.name).stem, '')
+        library_path = store_presentation_in_all_songs(entry.path, title, artist)
+        if mode == STORAGE_ALL_SONGS_ALIAS:
+            _alias_to_output(
+                library_path, output_dir, filename=entry.name, replace_path=entry.path)
+        linked += 1
+
+    _PREPARED_OUTPUT_FOLDERS.add(output_dir)
+    return linked
+
+
+def _song_lookup_key(value: str) -> str:
+    """Stable, loose key for comparing song titles/artists and filenames."""
+    text = Path(value or '').stem
+    text = re.sub(r'\s+\d+$', '', text.strip())
+    text = text.replace('&', ' and ')
+    return re.sub(r'[^a-z0-9]+', ' ', text.lower()).strip()
+
+
+def _build_all_songs_index() -> dict[str, list[str]]:
+    """Index library decks by filename title without opening every file."""
+    index: dict[str, list[str]] = {}
+    try:
+        entries = list(os.scandir(ALL_SONGS_DIR))
+    except FileNotFoundError:
+        return index
+
+    for entry in entries:
+        if not entry.is_file():
+            continue
+        if not entry.name.lower().endswith(REUSABLE_SONG_EXTS):
+            continue
+        key = _song_lookup_key(entry.name)
+        if key:
+            index.setdefault(key, []).append(entry.path)
+
+    for paths in index.values():
+        paths.sort(key=lambda p: os.path.basename(p).lower())
+    return index
+
+
+def _all_songs_index() -> dict[str, list[str]]:
+    global _ALL_SONGS_INDEX
+    if _ALL_SONGS_INDEX is None:
+        _ALL_SONGS_INDEX = _build_all_songs_index()
+    return _ALL_SONGS_INDEX
+
+
+def _first_slide_text_chunks(pptx_path: str) -> list[str]:
+    """Best-effort text extraction from slide 1 of a reusable deck."""
+    try:
+        prs = Presentation(pptx_path)
+        if not prs.slides:
+            return []
+        slide = prs.slides[0]
+    except Exception:
+        return []
+
+    chunks: list[str] = []
+    for shape in slide.shapes:
+        try:
+            if not getattr(shape, 'has_text_frame', False):
+                continue
+            text = shape.text.strip()
+        except Exception:
+            continue
+        if text:
+            chunks.append(text)
+    return chunks
+
+
+def _artist_matches(requested_artist: str, first_slide_chunks: list[str]) -> bool:
+    """Use first-slide text to avoid same-title/different-artist mistakes."""
+    artist_key = _song_lookup_key(requested_artist)
+    if not artist_key:
+        return True
+    if not first_slide_chunks:
+        return True
+
+    # The generated decks put title first and artist second, but older decks may
+    # only expose one combined text block. Check all slide-1 text when present.
+    slide_key = _song_lookup_key(' '.join(first_slide_chunks))
+    return artist_key in slide_key
+
+
+def _first_slide_meta(first_slide_chunks: list[str],
+                      fallback_title: str,
+                      fallback_artist: str) -> tuple[str, str]:
+    """Return title/artist inferred from slide 1, falling back to request data."""
+    title = fallback_title
+    artist = fallback_artist
+    if first_slide_chunks:
+        title = first_slide_chunks[0].strip() or title
+    if len(first_slide_chunks) > 1:
+        artist = first_slide_chunks[1].strip() or artist
+    return title, artist
+
+
+def _presentation_meta(pptx_path: str, fallback_title: str,
+                       fallback_artist: str) -> tuple[str, str]:
+    return _first_slide_meta(
+        _first_slide_text_chunks(pptx_path), fallback_title, fallback_artist)
+
+
+def _library_candidates(title: str, url: str) -> list[dict]:
+    requested_title = (title or _title_from_url(url)).strip()
+    title_key = _song_lookup_key(requested_title)
+    if not title_key:
+        return []
+
+    candidates = []
+    for src in list(_all_songs_index().get(title_key, [])):
+        if not os.path.exists(src):
+            continue
+        found_title, found_artist = _presentation_meta(
+            src, requested_title or Path(src).stem, '')
+        candidates.append({
+            'path': src,
+            'file': os.path.basename(src),
+            'title': found_title,
+            'artist': found_artist,
+            'artist_key': _song_lookup_key(found_artist),
+        })
+    return candidates
+
+
+def _public_choice(candidate: dict) -> dict:
+    return {
+        'path': candidate['path'],
+        'file': candidate['file'],
+        'title': candidate['title'],
+        'artist': candidate['artist'],
+    }
+
+
+def place_existing_song_in_output(src: str, output_base: str,
+                                  storage_mode: str | None = None) -> dict:
+    """Place one All Songs deck into the selected output folder."""
+    if not _path_is_inside(src, ALL_SONGS_DIR):
+        raise ValueError('That file is not inside the All Songs directory.')
+    if not os.path.isfile(src):
+        raise FileNotFoundError(src)
+
+    mode = clean_storage_mode(storage_mode)
+    os.makedirs(output_base, exist_ok=True)
+    delivery = 'linked'
+    if mode == STORAGE_ALL_SONGS_ALIAS:
+        dest = _alias_to_output(src, output_base)
+    else:
+        dest = os.path.join(output_base, os.path.basename(src))
+        if _resolved_path(src) != _resolved_path(dest):
+            if os.path.lexists(dest):
+                dest = _unique_path(output_base, os.path.basename(src))
+            shutil.copy2(src, dest)
+        delivery = 'copied'
+
+    title, artist = _presentation_meta(src, Path(src).stem, '')
+    return {
+        'path': dest,
+        'file': os.path.basename(dest),
+        'title': title,
+        'artist': artist,
+        'source': 'All Songs library',
+        'delivery': delivery,
+    }
+
+
+def resolve_existing_song_from_all_songs(artist: str, title: str, url: str,
+                                         output_base: str,
+                                         storage_mode: str | None = None) -> dict:
+    """Find a reusable deck, link it, or return an ambiguity prompt payload.
+
+    The library is checked for every output folder. When the same title has
+    multiple artist versions, the caller should let the user choose one or fetch
+    a new version.
+    """
+    candidates = _library_candidates(title, url)
+    if not candidates:
+        return {'status': 'none'}
+    if len(candidates) > 1:
+        return {
+            'status': 'ambiguous',
+            'choices': [_public_choice(c) for c in candidates],
+        }
+
+    requested_artist_key = _song_lookup_key(artist)
+    distinct_artist_keys = {
+        c['artist_key'] for c in candidates if c.get('artist_key')
+    }
+    exact_matches = [
+        c for c in candidates
+        if requested_artist_key and c.get('artist_key') == requested_artist_key
+    ]
+
+    if len(distinct_artist_keys) > 1:
+        return {
+            'status': 'ambiguous',
+            'choices': [_public_choice(c) for c in candidates],
+        }
+
+    if exact_matches:
+        return {
+            'status': 'placed',
+            'result': place_existing_song_in_output(
+                exact_matches[0]['path'], output_base, storage_mode),
+        }
+
+    if not requested_artist_key and len(candidates) == 1:
+        return {
+            'status': 'placed',
+            'result': place_existing_song_in_output(
+                candidates[0]['path'], output_base, storage_mode),
+        }
+
+    return {
+        'status': 'ambiguous',
+        'choices': [_public_choice(c) for c in candidates],
+    }
+
+
+def _library_destination_for_song(title: str, artist: str = '') -> str:
+    """Destination path for a song in All Songs using version rules."""
+    title = (title or '').strip() or 'song'
+    artist_key = _song_lookup_key(artist)
+    candidates = _library_candidates(title, '')
+
+    for candidate in candidates:
+        if artist_key and candidate.get('artist_key') == artist_key:
+            return candidate['path']
+
+    preferred_name = f'{safe_filename(title)}.pptx'
+    dest = os.path.join(ALL_SONGS_DIR, preferred_name)
+    if os.path.exists(dest):
+        dest = _unique_path(ALL_SONGS_DIR, preferred_name)
+    return dest
+
+
+def store_presentation_in_all_songs(pptx_path: str, title: str,
+                                    artist: str = '') -> str:
+    """Store a generated deck in All Songs and return the library path.
+
+    Same title + same artist overwrites the existing library version. Same title
+    with a different artist gets a numbered filename, e.g. "Song 2.pptx".
+    """
+    os.makedirs(ALL_SONGS_DIR, exist_ok=True)
+    dest = _library_destination_for_song(title, artist)
+
+    if _resolved_path(pptx_path) != _resolved_path(dest):
+        shutil.copy2(pptx_path, dest)
+    _invalidate_all_songs_index()
+    return dest
 
 
 def _title_from_url(url: str) -> str:
@@ -1174,10 +1554,49 @@ def gather_songs_gui() -> tuple[list[dict], str, list[dict]] | None:
                 "Fill in at least one song (artist + title, or a link).")
             return
 
+        output_base = output_dir_var.get().strip() or CUR_DIR
+        try:
+            os.makedirs(output_base, exist_ok=True)
+            prepare_selected_output_folder(output_base)
+        except OSError as exc:
+            messagebox.showerror(
+                "Can't use output folder",
+                f"Couldn't prepare the selected output folder:\n\n{exc}")
+            return
+
         create_btn.config(state="disabled")
         songs.clear()
         not_found = []
         for i, (artist, title, azlyrics_url, genius_url) in enumerate(entries, 1):
+            status_var.set(f"Checking library {i} of {len(entries)}...")
+            root.update_idletasks()
+            existing = resolve_existing_song_from_all_songs(
+                artist, title, azlyrics_url or genius_url, output_base)
+            if existing.get('status') == 'placed':
+                placed = existing['result']
+                songs.append({
+                    'title': placed['title'],
+                    'artist': placed['artist'],
+                    'lyrics': [],
+                    'source': placed['source'],
+                    'existing_path': placed['path'],
+                })
+                print(f"Placed from {placed['source']}: "
+                      f"{placed['title']} - {placed['artist']}")
+                continue
+            if existing.get('status') == 'ambiguous':
+                label = artist_title_or_link(artist, title, azlyrics_url, genius_url)
+                choices = '\n'.join(
+                    f"- {c.get('artist') or 'Unknown artist'} ({c.get('file')})"
+                    for c in existing.get('choices', []))
+                if messagebox.askyesno(
+                        "Multiple saved versions",
+                        f"{label}\n\nSaved versions found:\n{choices}\n\n"
+                        "Fetch a new version instead?"):
+                    pass
+                else:
+                    continue
+
             status_var.set(f"Searching {i} of {len(entries)}...")
             root.update_idletasks()
             song = fetch_song(artist, title, azlyrics_url, genius_url)
@@ -1210,7 +1629,7 @@ def gather_songs_gui() -> tuple[list[dict], str, list[dict]] | None:
             for name, var in bg_vars.items()
             if var.get()
         ]
-        app_settings['output_folder'] = output_dir_var.get().strip() or CUR_DIR
+        app_settings['output_folder'] = output_base
         app_settings['background_colors'] = {
             name: var.get()
             for name, var in bg_color_vars.items()
@@ -1566,8 +1985,13 @@ def _background_info(prs, background: dict | None,
 
 def build_song_presentation(song: dict, output_base: str,
                             background: dict | None = None,
-                            selected_backgrounds: list[dict] | None = None) -> str:
+                            selected_backgrounds: list[dict] | None = None,
+                            storage_mode: str | None = None) -> str:
     """Build the finished .pptx for one song and return its file path."""
+    if song.get('existing_path'):
+        return song['existing_path']
+
+    mode = clean_storage_mode(storage_mode)
     title = song['title']
     artist = song['artist']
     lyric_lines: list[str] = song['lyrics']
@@ -1599,7 +2023,12 @@ def build_song_presentation(song: dict, output_base: str,
             add_lyrics_slide(chunk)
 
     out_name = safe_filename(title)
-    bg_path = os.path.join(output_base, f'{out_name}.pptx')
+    if mode == STORAGE_ALL_SONGS_ALIAS:
+        final_pptx_path = _library_destination_for_song(title, artist)
+    elif _path_is_inside(output_base, ALL_SONGS_DIR):
+        final_pptx_path = _library_destination_for_song(title, artist)
+    else:
+        final_pptx_path = os.path.join(output_base, f'{out_name}.pptx')
 
     temp_pptx = tempfile.NamedTemporaryFile(
         suffix='.pptx', prefix='lyrics_slides_', delete=False)
@@ -1609,14 +2038,21 @@ def build_song_presentation(song: dict, output_base: str,
 
     info_pic = _background_info(P, background, selected_backgrounds)
     try:
-        creat_powerpoint_background(pptx_path, bg_path, info_pic)
+        creat_powerpoint_background(pptx_path, final_pptx_path, info_pic)
     finally:
         try:
             os.remove(pptx_path)
         except OSError:
             pass
 
-    return bg_path
+    if mode == STORAGE_BOTH_COPIES and not _path_is_inside(final_pptx_path, ALL_SONGS_DIR):
+        store_presentation_in_all_songs(final_pptx_path, title, artist)
+    elif _path_is_inside(final_pptx_path, ALL_SONGS_DIR):
+        _invalidate_all_songs_index()
+
+    if mode == STORAGE_ALL_SONGS_ALIAS:
+        return _alias_to_output(final_pptx_path, output_base)
+    return final_pptx_path
 
 
 def main() -> None:

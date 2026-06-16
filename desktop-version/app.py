@@ -209,6 +209,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({
                 'ok': True,
                 'output_folder': settings.get('output_folder', CUR_DIR) or CUR_DIR,
+                'storage_mode': core.clean_storage_mode(settings.get('storage_mode')),
             })
             return
 
@@ -301,11 +302,33 @@ class Handler(BaseHTTPRequestHandler):
         """Create the .pptx for one song."""
         output_folder = (data.get('output_folder') or '').strip()
         output_folder = os.path.expanduser(output_folder) or CUR_DIR
+        storage_mode = core.clean_storage_mode(data.get('storage_mode'))
         try:
             os.makedirs(output_folder, exist_ok=True)
+            core.prepare_selected_output_folder(output_folder, storage_mode)
         except OSError as exc:
             self._send_json({'ok': False,
                              'error': f"Can't use that output folder ({exc})."})
+            return
+
+        library_path = (data.get('library_path') or '').strip()
+        if library_path:
+            try:
+                existing = core.place_existing_song_in_output(
+                    library_path, output_folder, storage_mode)
+            except Exception as exc:
+                self._send_json({'ok': False,
+                                 'error': f"Couldn't place that library song ({exc})."})
+                return
+            self._send_json({
+                'ok': True,
+                'path': existing['path'],
+                'file': existing['file'],
+                'title': existing['title'],
+                'artist': existing['artist'],
+                'source': existing['source'],
+                'delivery': existing.get('delivery', ''),
+            })
             return
 
         manual_lyrics = data.get('lyrics') or ''
@@ -322,6 +345,34 @@ class Handler(BaseHTTPRequestHandler):
             if data.get('source'):
                 song['source'] = data['source']
         else:
+            if not data.get('skip_library'):
+                existing = core.resolve_existing_song_from_all_songs(
+                    artist=(data.get('artist') or '').strip(),
+                    title=(data.get('title') or '').strip(),
+                    url=(data.get('url') or '').strip(),
+                    output_base=output_folder,
+                    storage_mode=storage_mode)
+                if existing.get('status') == 'placed':
+                    result = existing['result']
+                    self._send_json({
+                        'ok': True,
+                        'path': result['path'],
+                        'file': result['file'],
+                        'title': result['title'],
+                        'artist': result['artist'],
+                        'source': result['source'],
+                        'delivery': result.get('delivery', ''),
+                    })
+                    return
+                if existing.get('status') == 'ambiguous':
+                    self._send_json({
+                        'ok': False,
+                        'needs_choice': True,
+                        'choices': existing.get('choices', []),
+                        'error': 'Multiple saved versions match this song.',
+                    })
+                    return
+
             song = fetch_song_for_request(data)
             if song is None:
                 self._send_json({
@@ -352,7 +403,8 @@ class Handler(BaseHTTPRequestHandler):
             with _BUILD_LOCK:
                 out_path = core.build_song_presentation(
                     song, output_folder, background=background,
-                    selected_backgrounds=selected_backgrounds)
+                    selected_backgrounds=selected_backgrounds,
+                    storage_mode=storage_mode)
         except Exception as exc:
             self._send_json({'ok': False,
                              'error': f'Failed to build the PowerPoint ({exc}).'})
@@ -365,12 +417,16 @@ class Handler(BaseHTTPRequestHandler):
             'title': song['title'],
             'artist': song['artist'],
             'source': song['source'],
+            'delivery': 'linked' if storage_mode == core.STORAGE_ALL_SONGS_ALIAS else
+                        ('copied' if storage_mode == core.STORAGE_BOTH_COPIES else 'output_only'),
         })
 
     def handle_save_settings(self, data: dict) -> None:
         settings = core.load_app_settings()
         if isinstance(data.get('output_folder'), str) and data['output_folder'].strip():
             settings['output_folder'] = data['output_folder'].strip()
+        if isinstance(data.get('storage_mode'), str):
+            settings['storage_mode'] = core.clean_storage_mode(data.get('storage_mode'))
         if isinstance(data.get('background_colors'), dict):
             settings['background_colors'] = {
                 str(k): (v if v in ('Auto', 'Black', 'White') else 'Auto')
