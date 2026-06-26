@@ -167,6 +167,20 @@
   }
   a.dlbtn:hover { filter: brightness(1.08); }
   a.dlbtn:active { transform: scale(.98); }
+  a.dlbtn.sm { padding: 6px 12px; font-size: 13px; }
+
+  /* download selector */
+  .dl-head { display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-top: 18px; }
+  .dl-head .hint { margin-top: 0; }
+  .dl-list { margin-top: 8px; border-top: 1px solid var(--border); }
+  .dl-item { display: flex; align-items: center; gap: 12px; padding: 11px 2px;
+    border-bottom: 1px solid var(--border); }
+  .dl-item:last-child { border-bottom: none; }
+  .dl-item input[type=checkbox] { flex: none; width: 17px; height: 17px; cursor: pointer; }
+  .dl-name { flex: 1; min-width: 0; font-size: 13.5px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .dl-fail { color: var(--bad); font-size: 12.5px; padding: 8px 2px; line-height: 1.5; }
 
   .count-card, .inline-row { display: flex; gap: 8px; }
   .count-card { align-items: center; gap: 12px; flex-wrap: wrap; }
@@ -410,13 +424,20 @@
   </div>
 
   <div class="card" id="dlAllBar" style="display:none; margin-top:14px">
-    <h2>Download everything</h2>
-    <div class="inline-row">
-      <input type="text" id="dlAllName" placeholder="Name the file, e.g. Sunday Worship"
-             style="flex:1; min-width:180px" onkeydown="if(event.key==='Enter')downloadAll()">
-      <button class="primary" onclick="downloadAll()" id="dlAllBtn">&#11015;&#65039; Download all (.zip)</button>
+    <h2>Download PowerPoints</h2>
+    <label class="fld">Name the zip file</label>
+    <input type="text" id="dlAllName" placeholder="e.g. Sunday Worship"
+           onkeydown="if(event.key==='Enter')downloadAll()">
+    <div class="row-btns">
+      <button class="primary" onclick="downloadAll()" id="dlAllBtn">&#11015;&#65039; Download selected (.zip)</button>
+      <span class="hint" id="dlAllHint" style="margin-top:0"></span>
     </div>
-    <div class="hint" id="dlAllHint">All created PowerPoints in one zip file.</div>
+    <div class="dl-head">
+      <span class="hint">Choose which PowerPoints to include in the zip</span>
+      <button id="dlSelectAllBtn" onclick="toggleSelectAllDownloads()"
+              style="padding:5px 12px; font-size:13px">Select all</button>
+    </div>
+    <div class="dl-list" id="dlAllList"></div>
   </div>
   </section>
 
@@ -459,9 +480,24 @@
       <span id="changeBgStatus" class="hint"></span>
     </div>
 
-    <div class="card" id="changedDownloads" style="display:none">
-      <h2>Changed PowerPoints</h2>
-      <div id="changedDownloadList"></div>
+    <div class="card" id="changedDownloads" style="display:none; margin-top:24px">
+      <h2>Download changed PowerPoints</h2>
+      <div id="changedZipWrap">
+        <label class="fld">Name the zip file</label>
+        <input type="text" id="changedZipName" placeholder="e.g. Changed PowerPoints"
+               onkeydown="if(event.key==='Enter')downloadChangedZip()">
+        <div class="row-btns">
+          <button class="primary" onclick="downloadChangedZip()" id="changedZipBtn">&#11015;&#65039; Download selected (.zip)</button>
+          <span class="hint" id="changedZipHint" style="margin-top:0"></span>
+        </div>
+        <div class="dl-head">
+          <span class="hint">Choose which PowerPoints to include in the zip</span>
+          <button id="changedSelectAllBtn" onclick="toggleSelectAllChanged()"
+                  style="padding:5px 12px; font-size:13px">Select all</button>
+        </div>
+        <div class="dl-list" id="changedDownloadList"></div>
+      </div>
+      <div id="changedFailList"></div>
     </div>
   </section>
 </div>
@@ -524,6 +560,7 @@ let songs = [];          // {artist,title,url,lyrics,source,bg,status,statusCls}
 let backgrounds = [];    // {name,color_mode,selected}
 let changeUploads = [];  // {kind,label,files:[File],includeSubfolders}
 let changeBg = 'random';
+let changedItems = [];   // {name,file,download,token,include} from the last change run
 let modalIdx = -1;
 
 const $ = id => document.getElementById(id);
@@ -711,17 +748,43 @@ function render() {
 
 function setStatus(i, msg, cls) { songs[i].status = msg; songs[i].statusCls = cls || ''; render(); }
 
+function readySongs() { return songs.filter(s => s.downloadUrl); }
+
 function updateDlAllBar() {
-  const ready = songs.filter(s => s.downloadUrl).length;
-  $('dlAllBar').style.display = ready ? '' : 'none';
-  if (ready) $('dlAllHint').textContent =
-    `${ready} PowerPoint${ready === 1 ? '' : 's'} ready - bundled into one zip file.`;
+  const ready = readySongs();
+  $('dlAllBar').style.display = ready.length ? '' : 'none';
+  if (!ready.length) return;
+  $('dlAllList').innerHTML = ready.map(s => {
+    const i = songs.indexOf(s);
+    const include = s.zipInclude !== false;
+    return `<label class="dl-item">
+        <input type="checkbox" ${include ? 'checked' : ''}
+               onchange="songs[${i}].zipInclude=this.checked; updateDlAllBar()">
+        <span class="dl-name" title="${esc(s.file)}">${esc(s.file)}</span>
+        <a class="dlbtn sm" href="${esc(s.downloadUrl)}" download="${esc(s.file)}">&#11015;&#65039; Download</a>
+      </label>`;
+  }).join('');
+  const sel = ready.filter(s => s.zipInclude !== false).length;
+  $('dlAllHint').textContent = `${sel} of ${ready.length} selected`;
+  $('dlAllBtn').disabled = sel === 0;
+  const btn = $('dlSelectAllBtn');
+  if (btn) {
+    btn.textContent = sel === ready.length ? 'Unselect all' : 'Select all';
+    btn.style.display = ready.length > 1 ? '' : 'none';
+  }
+}
+
+function toggleSelectAllDownloads() {
+  const ready = readySongs();
+  const target = !(ready.length && ready.every(s => s.zipInclude !== false));
+  for (const s of ready) s.zipInclude = target;
+  updateDlAllBar();
 }
 
 async function downloadAll() {
-  const tokens = songs.filter(s => s.downloadUrl)
+  const tokens = readySongs().filter(s => s.zipInclude !== false)
                       .map(s => s.downloadUrl.split('/').pop());
-  if (!tokens.length) { toast('Create the PowerPoints first.'); return; }
+  if (!tokens.length) { toast('Select at least one PowerPoint to include.'); return; }
   $('dlAllBtn').disabled = true;
   try {
     const r = await api('/api/download_all', {tokens, name: $('dlAllName').value});
@@ -732,7 +795,7 @@ async function downloadAll() {
       toast(`Downloading ${r.file} (${r.count} PowerPoint${r.count === 1 ? '' : 's'}).`);
     } else toast(r.error || "Couldn't build the zip.");
   } catch (e) { toast('Server error building the zip.'); }
-  $('dlAllBtn').disabled = false;
+  updateDlAllBar();
 }
 
 function hasInput(s) { return (s.artist.trim() && s.title.trim()) || s.url.trim() || s.lyrics.trim(); }
@@ -945,27 +1008,71 @@ function fileDataUrl(file) {
 
 function renderChangedDownloads(result) {
   const card = $('changedDownloads');
-  const host = $('changedDownloadList');
-  if (!card || !host) return;
+  if (!card) return;
   const changed = result.changed || [];
   const failed = result.failed || [];
-  if (!changed.length && !failed.length) {
+  changedItems = changed.map(item => ({
+    name: item.zip_name || item.source || item.file,
+    file: item.file,
+    download: item.download,
+    token: item.token || (item.download || '').split('/').pop(),
+    include: true,
+  }));
+  $('changedFailList').innerHTML = failed.map(item =>
+    `<div class="dl-fail">${esc(item.file || 'PowerPoint')}: ${esc(item.error || 'Failed')}</div>`).join('');
+  if (!changedItems.length && !failed.length) {
     card.style.display = 'none';
-    host.innerHTML = '';
+    $('changedDownloadList').innerHTML = '';
     return;
   }
-  const rows = [];
-  if (result.zip_download) {
-    rows.push(`<a class="dlbtn" href="${esc(result.zip_download)}" download="${esc(result.zip_file || 'Changed PowerPoints.zip')}">&#11015;&#65039; Download all changed PowerPoints</a>`);
-  }
-  for (const item of changed) {
-    rows.push(`<a class="dlbtn" href="${esc(item.download)}" download="${esc(item.file)}">&#11015;&#65039; ${esc(item.source || item.file)}</a>`);
-  }
-  for (const item of failed) {
-    rows.push(`<div class="hint" style="color:var(--bad)">${esc(item.file || 'PowerPoint')}: ${esc(item.error || 'Failed')}</div>`);
-  }
-  host.innerHTML = `<div class="row-btns">${rows.join('')}</div>`;
+  $('changedZipWrap').style.display = changedItems.length ? '' : 'none';
+  renderChangedList();
   card.style.display = '';
+}
+
+function renderChangedList() {
+  $('changedDownloadList').innerHTML = changedItems.map((item, i) => `
+    <label class="dl-item">
+      <input type="checkbox" ${item.include ? 'checked' : ''}
+             onchange="changedItems[${i}].include=this.checked; updateChangedZipBar()">
+      <span class="dl-name" title="${esc(item.name)}">${esc(item.name)}</span>
+      <a class="dlbtn sm" href="${esc(item.download)}" download="${esc(item.file)}">&#11015;&#65039; Download</a>
+    </label>`).join('');
+  updateChangedZipBar();
+}
+
+function updateChangedZipBar() {
+  const total = changedItems.length;
+  const sel = changedItems.filter(it => it.include).length;
+  $('changedZipHint').textContent = `${sel} of ${total} selected`;
+  $('changedZipBtn').disabled = sel === 0;
+  const btn = $('changedSelectAllBtn');
+  if (btn) {
+    btn.textContent = sel === total ? 'Unselect all' : 'Select all';
+    btn.style.display = total > 1 ? '' : 'none';
+  }
+}
+
+function toggleSelectAllChanged() {
+  const target = !(changedItems.length && changedItems.every(it => it.include));
+  for (const it of changedItems) it.include = target;
+  renderChangedList();
+}
+
+async function downloadChangedZip() {
+  const tokens = changedItems.filter(it => it.include).map(it => it.token).filter(Boolean);
+  if (!tokens.length) { toast('Select at least one PowerPoint to include.'); return; }
+  $('changedZipBtn').disabled = true;
+  try {
+    const r = await api('/api/download_all', {tokens, name: $('changedZipName').value});
+    if (r.ok) {
+      const a = document.createElement('a');
+      a.href = r.download; a.download = r.file;
+      document.body.appendChild(a); a.click(); a.remove();
+      toast(`Downloading ${r.file} (${r.count} PowerPoint${r.count === 1 ? '' : 's'}).`);
+    } else toast(r.error || "Couldn't build the zip.");
+  } catch (e) { toast('Server error building the zip.'); }
+  updateChangedZipBar();
 }
 
 async function changeUploadedBackgrounds() {
