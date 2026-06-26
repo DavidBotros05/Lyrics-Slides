@@ -34,6 +34,7 @@ PORT = 8765
 _BUILD_LOCK = threading.Lock()
 
 ALLOWED_IMAGE_EXTS = ('.png', '.jpg', '.jpeg')
+ALLOWED_PPTX_EXTS = ('.pptx',)
 
 # ---- auto-shutdown when the browser tab goes away -------------------------
 # The page pings /api/ping every couple of seconds and sends a final
@@ -83,11 +84,20 @@ def list_background_images() -> list[str]:
     return sorted(out, key=str.lower)
 
 
+def short_error(exc: Exception, limit: int = 180) -> str:
+    msg = ' '.join(str(exc).split())
+    return (msg[:limit] + '...') if len(msg) > limit else (msg or type(exc).__name__)
+
+
 # Only one native folder dialog at a time.
 _DIALOG_LOCK = threading.Lock()
 
 
-def pick_folder_dialog() -> str | None:
+def _applescript_string(value: str) -> str:
+    return '"' + value.replace('\\', '\\\\').replace('"', '\\"') + '"'
+
+
+def pick_folder_dialog(prompt: str = 'Choose where to save the PowerPoints') -> str | None:
     """Open a native 'choose folder' dialog.
 
     Returns the chosen path, '' if the user cancelled, or None if no
@@ -96,7 +106,7 @@ def pick_folder_dialog() -> str | None:
     if sys.platform == 'darwin':
         script = ('tell application "System Events" to activate\n'
                   'POSIX path of (choose folder with prompt '
-                  '"Choose where to save the PowerPoints")')
+                  f'{_applescript_string(prompt)})')
         try:
             out = subprocess.run(['osascript', '-e', script],
                                  capture_output=True, text=True, timeout=600)
@@ -114,7 +124,41 @@ def pick_folder_dialog() -> str | None:
         "from tkinter import filedialog\n"
         "root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)\n"
         "print(filedialog.askdirectory("
-        "title='Choose where to save the PowerPoints') or '')\n")
+        f"title={prompt!r}) or '')\n")
+    try:
+        out = subprocess.run([sys.executable, '-c', code],
+                             capture_output=True, text=True, timeout=600)
+        if out.returncode == 0:
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def pick_powerpoint_dialog() -> str | None:
+    """Open a native 'choose .pptx file' dialog."""
+    prompt = 'Choose a PowerPoint to change'
+    if sys.platform == 'darwin':
+        script = ('tell application "System Events" to activate\n'
+                  'POSIX path of (choose file with prompt '
+                  f'{_applescript_string(prompt)})')
+        try:
+            out = subprocess.run(['osascript', '-e', script],
+                                 capture_output=True, text=True, timeout=600)
+            if out.returncode == 0:
+                return out.stdout.strip()
+            if 'User canceled' in (out.stderr or '') or out.returncode == 1:
+                return ''
+        except Exception:
+            pass
+
+    code = (
+        "import tkinter as tk\n"
+        "from tkinter import filedialog\n"
+        "root = tk.Tk(); root.withdraw(); root.attributes('-topmost', True)\n"
+        "print(filedialog.askopenfilename("
+        "title='Choose a PowerPoint to change', "
+        "filetypes=[('PowerPoint', '*.pptx')]) or '')\n")
     try:
         out = subprocess.run([sys.executable, '-c', code],
                              capture_output=True, text=True, timeout=600)
@@ -255,12 +299,29 @@ class Handler(BaseHTTPRequestHandler):
                                  'error': 'A folder dialog is already open.'})
                 return
             try:
-                chosen = pick_folder_dialog()
+                prompt = (data.get('prompt') or 'Choose where to save the PowerPoints')
+                chosen = pick_folder_dialog(str(prompt))
             finally:
                 _DIALOG_LOCK.release()
             if chosen is None:
                 self._send_json({'ok': False,
                                  'error': "Couldn't open a folder dialog - "
+                                          'type the path instead.'})
+            else:
+                self._send_json({'ok': True, 'path': chosen,
+                                 'cancelled': chosen == ''})
+        elif path == '/api/pick_powerpoint':
+            if not _DIALOG_LOCK.acquire(blocking=False):
+                self._send_json({'ok': False,
+                                 'error': 'A file dialog is already open.'})
+                return
+            try:
+                chosen = pick_powerpoint_dialog()
+            finally:
+                _DIALOG_LOCK.release()
+            if chosen is None:
+                self._send_json({'ok': False,
+                                 'error': "Couldn't open a file dialog - "
                                           'type the path instead.'})
             else:
                 self._send_json({'ok': True, 'path': chosen,
@@ -271,6 +332,8 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_spotify_playlist(data)
         elif path == '/api/create_one':
             self.handle_create_one(data)
+        elif path == '/api/change_backgrounds':
+            self.handle_change_backgrounds(data)
         elif path == '/api/save_settings':
             self.handle_save_settings(data)
         elif path == '/api/upload_background':
@@ -309,6 +372,167 @@ class Handler(BaseHTTPRequestHandler):
             'total': result['total'],
             'note': result.get('note', ''),
         })
+
+    def _background_options_for_request(self, data: dict) -> tuple[dict | None, list[dict]]:
+        bg_name = (data.get('background') or '').strip()
+        all_images = list_background_images()
+        settings = core.load_app_settings()
+        saved_colors = settings.get('background_colors', {}) or {}
+
+        background = None
+        if bg_name and bg_name != 'random' and bg_name in all_images:
+            background = {
+                'image': bg_name,
+                'color_mode': saved_colors.get(bg_name, 'Auto'),
+            }
+
+        saved_selected = settings.get('background_selected', {}) or {}
+        selected_backgrounds = [
+            {'image': n, 'color_mode': saved_colors.get(n, 'Auto')}
+            for n in all_images if saved_selected.get(n, True)
+        ]
+        return background, selected_backgrounds
+
+    def _pptx_sources_for_path(self, source_path: str,
+                               include_subfolders: bool = True) -> tuple[Path | None, list[Path], str | None]:
+        source = Path(os.path.expanduser(source_path)).resolve(strict=False)
+        if source.is_file():
+            if source.suffix.lower() not in ALLOWED_PPTX_EXTS:
+                return None, [], 'Choose a .pptx file.'
+            return source.parent, [source], None
+        if source.is_dir():
+            iterator = source.rglob('*') if include_subfolders else source.iterdir()
+            files = sorted(
+                p for p in iterator
+                if p.is_file()
+                and p.suffix.lower() in ALLOWED_PPTX_EXTS
+                and not p.name.startswith('~$')
+            )
+            if not files:
+                return source, [], 'No .pptx files were found in that folder.'
+            return source, files, None
+        return None, [], "That PowerPoint path or folder doesn't exist."
+
+    def handle_change_backgrounds(self, data: dict) -> None:
+        """Change backgrounds for one .pptx file or every .pptx in a folder."""
+        source_items = []
+        raw_items = data.get('source_items')
+        if isinstance(raw_items, list):
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                path = item.get('path')
+                if not isinstance(path, str) or not path.strip():
+                    continue
+                source_items.append({
+                    'path': path.strip(),
+                    'include_subfolders': bool(item.get('include_subfolders', True)),
+                })
+        else:
+            raw_sources = data.get('source_paths')
+            if not isinstance(raw_sources, list):
+                raw_sources = [data.get('source_path')]
+            include_subfolders = bool(data.get('include_subfolders', True))
+            for path in raw_sources:
+                if isinstance(path, str) and path.strip():
+                    source_items.append({
+                        'path': path.strip(),
+                        'include_subfolders': include_subfolders,
+                    })
+
+        if not source_items:
+            self._send_json({'ok': False,
+                             'error': 'Choose at least one PowerPoint or source folder first.'})
+            return
+
+        source_groups = []
+        source_errors = []
+        seen_sources = set()
+        for item in source_items:
+            source_path = item['path']
+            source_probe = Path(os.path.expanduser(source_path)).resolve(strict=False)
+            source_is_dir = source_probe.is_dir()
+            source_root, sources, error = self._pptx_sources_for_path(
+                source_path, include_subfolders=item['include_subfolders'])
+            if error:
+                source_errors.append({'source': source_path, 'error': error})
+                continue
+            unique_sources = []
+            for src in sources:
+                key = str(src.resolve(strict=False))
+                if key in seen_sources:
+                    continue
+                seen_sources.add(key)
+                unique_sources.append(src)
+            if unique_sources:
+                source_groups.append({
+                    'path': source_path,
+                    'root': source_root,
+                    'is_dir': source_is_dir,
+                    'sources': unique_sources,
+                })
+
+        if not source_groups:
+            error = source_errors[0]['error'] if source_errors else 'No .pptx files were found.'
+            self._send_json({'ok': False, 'error': error, 'failed': source_errors})
+            return
+
+        output_mode = (data.get('output_mode') or 'overwrite').strip()
+        if output_mode not in ('overwrite', 'copy_to_folder'):
+            output_mode = 'overwrite'
+
+        output_folder_raw = (data.get('output_folder') or '').strip()
+        output_folder = Path(os.path.expanduser(output_folder_raw))
+        if output_mode == 'copy_to_folder':
+            if not output_folder_raw:
+                self._send_json({'ok': False,
+                                 'error': 'Choose where to save the changed PowerPoints.'})
+                return
+            try:
+                output_folder.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                self._send_json({'ok': False,
+                                 'error': f"Can't use that output folder ({exc})."})
+                return
+
+        background, selected_backgrounds = self._background_options_for_request(data)
+        delete_original = bool(data.get('delete_original')) and output_mode == 'copy_to_folder'
+
+        changed = []
+        failed = list(source_errors)
+        multiple_source_groups = len(source_groups) > 1
+        for group in source_groups:
+            source_root = group['root']
+            source_is_dir = group['is_dir']
+            for src in group['sources']:
+                if output_mode == 'overwrite':
+                    dest = src
+                elif source_is_dir and source_root:
+                    rel = src.relative_to(source_root)
+                    dest = output_folder / source_root.name / rel if multiple_source_groups else output_folder / rel
+                else:
+                    dest = output_folder / src.name
+
+                try:
+                    with _BUILD_LOCK:
+                        core.change_powerpoint_background(
+                            str(src), str(dest),
+                            background=background,
+                            selected_backgrounds=selected_backgrounds)
+                    if delete_original and src.resolve(strict=False) != dest.resolve(strict=False):
+                        src.unlink()
+                    changed.append({'source': str(src), 'path': str(dest), 'file': dest.name})
+                except Exception as exc:
+                    failed.append({'source': str(src), 'error': short_error(exc)})
+
+        self._send_json({
+            'ok': not failed,
+            'changed': changed,
+            'failed': failed,
+            'changed_count': len(changed),
+            'failed_count': len(failed),
+            'deleted_originals': delete_original,
+        }, status=200 if not failed else 500)
 
     def handle_create_one(self, data: dict) -> None:
         """Create the .pptx for one song."""

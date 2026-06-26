@@ -2013,6 +2013,19 @@ def _background_info(prs, background: dict | None,
         images_dir, prs, source=chosen['image'], transform=transform)
 
 
+def change_powerpoint_background(pptx_path: str, output_path: str,
+                                 background: dict | None = None,
+                                 selected_backgrounds: list[dict] | None = None) -> str:
+    """Apply a new saved/random background to an existing .pptx file."""
+    prs = Presentation(pptx_path)
+    info_pic = _background_info(prs, background, selected_backgrounds)
+    out_dir = os.path.dirname(output_path)
+    if out_dir:
+        os.makedirs(out_dir, exist_ok=True)
+    creat_powerpoint_background(pptx_path, output_path, info_pic)
+    return output_path
+
+
 def build_song_presentation(song: dict, output_base: str,
                             background: dict | None = None,
                             selected_backgrounds: list[dict] | None = None,

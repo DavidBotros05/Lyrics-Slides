@@ -40,7 +40,8 @@
   .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 88px; }
 
   header { display: flex; align-items: center; justify-content: space-between;
-    gap: 16px; margin-bottom: 24px; }
+    gap: 16px; margin-bottom: 26px; padding-bottom: 20px;
+    border-bottom: 1px solid var(--border); }
   .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .mark { width: 40px; height: 40px; flex: none; border-radius: 12px;
     display: flex; align-items: center; justify-content: center; font-size: 19px;
@@ -60,9 +61,31 @@
   .card.alert { border-color: rgba(255, 120, 120, .35);
     background: linear-gradient(var(--bad-soft), transparent 70%), var(--panel); }
 
+  .tabs { display: flex; gap: 26px; margin-bottom: 20px;
+    border-bottom: 1px solid var(--border); }
+  .tab-btn {
+    border: none; border-bottom: 2px solid transparent; border-radius: 0;
+    background: transparent; color: var(--muted); padding: 9px 2px;
+    margin-bottom: -1px; font-size: 14px; font-weight: 550;
+  }
+  .tab-btn:hover:not(:disabled) {
+    background: transparent; color: var(--text); border-bottom-color: var(--border-strong);
+  }
+  .tab-btn:active:not(:disabled) { transform: none; }
+  .tab-btn.active {
+    color: var(--text); background: transparent; border-bottom-color: var(--accent);
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
   .song-head { display: flex; justify-content: space-between; align-items: center;
     gap: 10px; margin-bottom: 12px; }
-  .song-head .num { font-weight: 650; font-size: 15px; letter-spacing: -0.01em; }
+  .song-head .num { display: inline-flex; align-items: center; gap: 10px;
+    font-weight: 650; font-size: 15px; letter-spacing: -0.01em; }
+  .song-idx { display: inline-flex; align-items: center; justify-content: center;
+    width: 25px; height: 25px; border-radius: 8px; font-size: 12.5px; font-weight: 650;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid rgba(141, 126, 248, .22); }
   .song-status { font-size: 12.5px; font-weight: 500; line-height: 1.4;
     padding: 3px 10px; border-radius: 8px; text-align: right;
     background: var(--panel2); color: var(--muted); }
@@ -89,6 +112,12 @@
     border-color: var(--border-strong); }
   input[type=text]:focus, input[type=number]:focus, textarea:focus, select:focus {
     border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  select {
+    appearance: none; -webkit-appearance: none; cursor: pointer;
+    padding-right: 38px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%238e97ac' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M1 1.5 6 6.5 11 1.5'/></svg>");
+    background-repeat: no-repeat; background-position: right 14px center;
+  }
   .or { text-align: center; color: var(--muted); font-size: 12px; margin: 8px 0 6px;
         display: flex; align-items: center; gap: 10px; }
   .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
@@ -144,6 +173,14 @@
   .inline-row { align-items: stretch; }
   .inline-row input { flex: 1; min-width: 0; }
   .card, .song-head, .row-btns, .inline-row { min-width: 0; }
+  .choice-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .choice-row label { display: inline-flex; align-items: center; gap: 7px;
+    color: var(--muted); font-size: 13px; }
+  .upload-row { display: grid; grid-template-columns: 1fr auto; gap: 10px;
+    align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .upload-row:last-child { border-bottom: none; }
+  .upload-row .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .upload-row .meta { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
 
   .bigbar { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
   .bigbar button.primary { padding: 12px 28px; font-size: 15px; border-radius: 11px; }
@@ -156,7 +193,8 @@
     border: 1px solid var(--border); }
   .mgr-row .nm { flex: 1; font-size: 13.5px; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
-  .mgr-row select { width: 92px; padding: 6px 8px; font-size: 13px; }
+  .mgr-row select { width: 98px; padding: 6px 28px 6px 10px; font-size: 13px;
+    background-position: right 10px center; }
   .switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
   .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
   .switch .tr { position: absolute; inset: 0; background: var(--border-strong);
@@ -323,6 +361,12 @@
     <div class="hint">Open the app's web address instead.</div>
   </div>
 
+  <div class="tabs">
+    <button id="createTabBtn" class="tab-btn active" onclick="setTab('create')">Create slides</button>
+    <button id="changeBgTabBtn" class="tab-btn" onclick="setTab('changeBg')">Change backgrounds</button>
+  </div>
+
+  <section id="createTab" class="tab-panel active">
   <div class="card count-card">
     <label style="font-weight:600">How many songs?</label>
     <input type="number" id="songCount" min="1" max="200" value="1"
@@ -351,6 +395,7 @@
       <div class="row-btns">
         <button onclick="document.getElementById('upl').click()">+ Add image&hellip;</button>
         <input type="file" id="upl" accept=".png,.jpg,.jpeg" style="display:none" onchange="uploadBg(this)">
+        <button id="selectAllBtn" onclick="toggleSelectAllBackgrounds()">Select all</button>
         <span class="hint">Toggled-on images form the pool used when a song's background is "Random".
         Text color is normally picked automatically; override it per image here. A contrast shadow +
         outline is always added so lyrics stay readable.</span>
@@ -373,6 +418,52 @@
     </div>
     <div class="hint" id="dlAllHint">All created PowerPoints in one zip file.</div>
   </div>
+  </section>
+
+  <section id="changeBgTab" class="tab-panel">
+    <div class="card">
+      <h2>PowerPoints to change</h2>
+      <div id="changeUploads"></div>
+      <div class="row-btns">
+        <button onclick="document.getElementById('changePptxInput').click()">+ Add PPTX files&hellip;</button>
+        <button onclick="document.getElementById('changeFolderInput').click()">+ Add folder&hellip;</button>
+        <input type="file" id="changePptxInput" accept=".pptx" multiple style="display:none"
+               onchange="addChangePptxFiles(this)">
+        <input type="file" id="changeFolderInput" accept=".pptx" multiple webkitdirectory directory style="display:none"
+               onchange="addChangeFolderFiles(this)">
+      </div>
+      <div class="hint">Folder rows keep their relative paths. Turn off subfolders on a folder row to use only the PowerPoints directly inside that folder.</div>
+    </div>
+
+    <div class="card">
+      <h2>New background</h2>
+      <label class="fld">Background to apply</label>
+      <div class="bg-strip" id="changeBgStrip"></div>
+      <div class="hint">Random uses the toggled-on images from the background manager below.</div>
+    </div>
+
+    <div class="card">
+      <details id="changeMgrDetails" open>
+        <summary>Manage backgrounds (random pool, text color, add images)</summary>
+        <div id="changeMgrList"></div>
+        <div class="row-btns">
+          <button onclick="document.getElementById('upl').click()">+ Add image&hellip;</button>
+          <button id="changeSelectAllBtn" onclick="toggleSelectAllBackgrounds()">Select all</button>
+          <span class="hint">Use Adjust to move or stretch each background before applying it to uploaded PowerPoints.</span>
+        </div>
+      </details>
+    </div>
+
+    <div class="bigbar">
+      <button class="primary" id="changeBgBtn" onclick="changeUploadedBackgrounds()">Change backgrounds</button>
+      <span id="changeBgStatus" class="hint"></span>
+    </div>
+
+    <div class="card" id="changedDownloads" style="display:none">
+      <h2>Changed PowerPoints</h2>
+      <div id="changedDownloadList"></div>
+    </div>
+  </section>
 </div>
 
 <!-- lyrics preview / edit modal -->
@@ -431,6 +522,8 @@
 <script>
 let songs = [];          // {artist,title,url,lyrics,source,bg,status,statusCls}
 let backgrounds = [];    // {name,color_mode,selected}
+let changeUploads = [];  // {kind,label,files:[File],includeSubfolders}
+let changeBg = 'random';
 let modalIdx = -1;
 
 const $ = id => document.getElementById(id);
@@ -445,6 +538,14 @@ async function api(path, body, signal) {
                        body: JSON.stringify(body), signal} : {signal};
   const r = await fetch(path, opts);
   return r.json();
+}
+
+function setTab(tab) {
+  const isChange = tab === 'changeBg';
+  $('createTab').classList.toggle('active', !isChange);
+  $('changeBgTab').classList.toggle('active', isChange);
+  $('createTabBtn').classList.toggle('active', !isChange);
+  $('changeBgTabBtn').classList.toggle('active', isChange);
 }
 
 function newSong() {
@@ -472,12 +573,14 @@ function esc(s) {
                   .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function jsq(s) { return JSON.stringify(s || ''); }
+
 function bgStrip(i) {
   const s = songs[i];
   let h = `<div class="bg-opt ${s.bg==='random'?'sel':''}" onclick="pickBg(${i},'random')">
              <div class="rand">&#127922;</div><div class="nm">Random</div></div>`;
   for (const b of backgrounds) {
-    h += `<div class="bg-opt ${s.bg===b.name?'sel':''}" onclick="pickBg(${i},'${esc(b.name)}')">
+    h += `<div class="bg-opt ${s.bg===b.name?'sel':''}" onclick="pickBg(${i},${jsq(b.name)})">
             <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
             <div class="nm" title="${esc(b.name)}">${esc(b.name)}</div></div>`;
   }
@@ -486,12 +589,96 @@ function bgStrip(i) {
 
 function pickBg(i, name) { songs[i].bg = name; render(); }
 
+function renderChangeBgStrip() {
+  const host = $('changeBgStrip');
+  if (!host) return;
+  let h = `<div class="bg-opt ${changeBg==='random'?'sel':''}" onclick="pickChangeBg('random')">
+             <div class="rand">&#127922;</div><div class="nm">Random</div></div>`;
+  for (const b of backgrounds) {
+    h += `<div class="bg-opt ${changeBg===b.name?'sel':''}" onclick="pickChangeBg(${jsq(b.name)})">
+            <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
+            <div class="nm" title="${esc(b.name)}">${esc(b.name)}</div></div>`;
+  }
+  host.innerHTML = h;
+}
+
+function pickChangeBg(name) { changeBg = name; renderChangeBgStrip(); }
+
+function pptxFiles(files) {
+  return Array.from(files || []).filter(f => f.name && f.name.toLowerCase().endsWith('.pptx'));
+}
+
+function relativeParts(file) {
+  const rel = (file.webkitRelativePath || file.name || '').replace(/\\/g, '/');
+  return rel.split('/').filter(Boolean);
+}
+
+function effectiveRowFiles(row) {
+  if (row.kind !== 'folder' || row.includeSubfolders !== false) return row.files;
+  return row.files.filter(file => relativeParts(file).length <= 2);
+}
+
+function renderChangeUploads() {
+  const host = $('changeUploads');
+  if (!host) return;
+  if (!changeUploads.length) {
+    host.innerHTML = '<div class="hint">No PowerPoints added yet.</div>';
+    return;
+  }
+  host.innerHTML = changeUploads.map((row, i) => {
+    const total = row.files.length;
+    const active = effectiveRowFiles(row).length;
+    const folderToggle = row.kind === 'folder'
+      ? `<div class="choice-row"><label><input type="checkbox" ${row.includeSubfolders !== false ? 'checked' : ''}
+           onchange="changeUploads[${i}].includeSubfolders=this.checked; renderChangeUploads()">
+           Include subfolders for this folder</label></div>`
+      : '';
+    return `<div class="upload-row">
+      <div>
+        <div class="nm" title="${esc(row.label)}">${esc(row.label)}</div>
+        <div class="meta">${active} PowerPoint${active === 1 ? '' : 's'} selected${active !== total ? ` (${total - active} nested skipped)` : ''}</div>
+        ${folderToggle}
+      </div>
+      <button class="danger" onclick="removeChangeUpload(${i})">Remove</button>
+    </div>`;
+  }).join('');
+}
+
+function removeChangeUpload(i) {
+  changeUploads.splice(i, 1);
+  renderChangeUploads();
+}
+
+function addChangePptxFiles(input) {
+  const files = pptxFiles(input.files);
+  for (const file of files) {
+    changeUploads.push({kind:'file', label:file.name, files:[file], includeSubfolders:true});
+  }
+  if (!files.length) toast('Choose .pptx files.');
+  input.value = '';
+  renderChangeUploads();
+}
+
+function addChangeFolderFiles(input) {
+  const files = pptxFiles(input.files);
+  if (!files.length) {
+    toast('No .pptx files found in that folder.');
+    input.value = '';
+    return;
+  }
+  const firstParts = relativeParts(files[0]);
+  const label = firstParts.length > 1 ? firstParts[0] : 'Uploaded folder';
+  changeUploads.push({kind:'folder', label, files, includeSubfolders:true});
+  input.value = '';
+  renderChangeUploads();
+}
+
 function render() {
   const host = $('songs');
   host.innerHTML = songs.map((s, i) => `
     <div class="card">
       <div class="song-head">
-        <span class="num">Song ${i + 1}</span>
+        <span class="num"><span class="song-idx">${i + 1}</span>Song</span>
         <span class="song-status ${s.statusCls}">${s.status}</span>
       </div>
       <div class="grid2">
@@ -747,21 +934,122 @@ async function createAll() {
         (made ? '. Tap the green Download buttons.' : '.'));
 }
 
+function fileDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error || new Error('File read failed'));
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderChangedDownloads(result) {
+  const card = $('changedDownloads');
+  const host = $('changedDownloadList');
+  if (!card || !host) return;
+  const changed = result.changed || [];
+  const failed = result.failed || [];
+  if (!changed.length && !failed.length) {
+    card.style.display = 'none';
+    host.innerHTML = '';
+    return;
+  }
+  const rows = [];
+  if (result.zip_download) {
+    rows.push(`<a class="dlbtn" href="${esc(result.zip_download)}" download="${esc(result.zip_file || 'Changed PowerPoints.zip')}">&#11015;&#65039; Download all changed PowerPoints</a>`);
+  }
+  for (const item of changed) {
+    rows.push(`<a class="dlbtn" href="${esc(item.download)}" download="${esc(item.file)}">&#11015;&#65039; ${esc(item.source || item.file)}</a>`);
+  }
+  for (const item of failed) {
+    rows.push(`<div class="hint" style="color:var(--bad)">${esc(item.file || 'PowerPoint')}: ${esc(item.error || 'Failed')}</div>`);
+  }
+  host.innerHTML = `<div class="row-btns">${rows.join('')}</div>`;
+  card.style.display = '';
+}
+
+async function changeUploadedBackgrounds() {
+  const selected = [];
+  for (const row of changeUploads) {
+    for (const file of effectiveRowFiles(row)) {
+      selected.push({file, relativePath: file.webkitRelativePath || file.name});
+    }
+  }
+  if (!selected.length) { toast('Add at least one PowerPoint first.'); return; }
+
+  $('changeBgBtn').disabled = true;
+  $('changeBgStatus').innerHTML = '<span class="spin"></span>Reading uploads...';
+  try {
+    await saveSettings();
+    const files = [];
+    for (let i = 0; i < selected.length; i++) {
+      $('changeBgStatus').innerHTML = `<span class="spin"></span>Reading ${i + 1} of ${selected.length}...`;
+      files.push({
+        name: selected[i].file.name,
+        relative_path: selected[i].relativePath,
+        data: await fileDataUrl(selected[i].file),
+      });
+    }
+    $('changeBgStatus').innerHTML = '<span class="spin"></span>Changing backgrounds...';
+    const r = await api('/api/change_backgrounds_upload', {
+      files,
+      background: changeBg,
+    });
+    renderChangedDownloads(r);
+    const changed = r.changed_count || 0;
+    const failed = r.failed_count || 0;
+    $('changeBgStatus').textContent = failed
+      ? `Changed ${changed}; ${failed} failed.`
+      : `Done - ${changed} changed.`;
+    toast(failed ? `Changed ${changed}; ${failed} failed.` : `Changed ${changed} PowerPoint${changed === 1 ? '' : 's'}.`);
+  } catch (e) {
+    $('changeBgStatus').textContent = 'Server error changing backgrounds.';
+    toast('Server error changing backgrounds.');
+  }
+  $('changeBgBtn').disabled = false;
+}
+
 /* ---------- backgrounds manager ---------- */
 function renderMgr() {
-  $('mgrList').innerHTML = backgrounds.map((b, i) => `
+  const html = backgrounds.map((b, i) => `
     <div class="mgr-row">
       <label class="switch"><input type="checkbox" ${b.selected ? 'checked' : ''}
-        onchange="backgrounds[${i}].selected=this.checked; saveSettings()">
+        onchange="backgrounds[${i}].selected=this.checked; renderMgr(); saveSettings()">
         <span class="tr"></span></label>
       <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
       <span class="nm">${esc(b.name)}</span>
       <button onclick="openAdjust(${i})" style="padding:5px 12px; font-size:13px">Adjust</button>
-      <select onchange="backgrounds[${i}].color_mode=this.value; saveSettings()">
+      <select onchange="backgrounds[${i}].color_mode=this.value; renderMgr(); saveSettings()">
         ${['Auto','Black','White'].map(m =>
           `<option ${b.color_mode === m ? 'selected' : ''}>${m}</option>`).join('')}
       </select>
     </div>`).join('') || '<div class="hint">No images yet - add one below.</div>';
+  $('mgrList').innerHTML = html;
+  $('changeMgrList').innerHTML = html;
+  renderChangeBgStrip();
+  updateSelectAllBtns();
+}
+
+function allBackgroundsSelected() {
+  return backgrounds.length > 0 && backgrounds.every(b => b.selected);
+}
+
+function updateSelectAllBtns() {
+  const label = allBackgroundsSelected() ? 'Unselect all' : 'Select all';
+  for (const id of ['selectAllBtn', 'changeSelectAllBtn']) {
+    const btn = $(id);
+    if (!btn) continue;
+    btn.textContent = label;
+    btn.disabled = backgrounds.length === 0;
+  }
+}
+
+function toggleSelectAllBackgrounds() {
+  if (!backgrounds.length) return;
+  const target = !allBackgroundsSelected();
+  for (const b of backgrounds) b.selected = target;
+  renderMgr();
+  saveSettings();
 }
 
 async function saveSettings() {
@@ -918,6 +1206,7 @@ async function loadBackgrounds() {
   } catch (e) {
     $('fileWarn').style.display = 'block';
   }
+  renderChangeUploads();
   render();
 })();
 

@@ -37,6 +37,8 @@ PORT = int(os.environ.get('PORT', '8765'))
 _BUILD_LOCK = threading.Lock()
 
 ALLOWED_IMAGE_EXTS = ('.png', '.jpg', '.jpeg')
+ALLOWED_PPTX_EXTS = ('.pptx',)
+MAX_UPLOAD_PPTX_BYTES = 80 * 1024 * 1024
 
 # Finished presentations waiting to be downloaded: token -> (path, created_at).
 _DOWNLOADS: dict[str, tuple[str, float]] = {}
@@ -64,6 +66,18 @@ def _register_download(path: str) -> str:
     return token
 
 
+def _unique_download_path(path: str) -> str:
+    folder = os.path.dirname(path) or _DOWNLOAD_DIR
+    stem = Path(path).stem
+    suffix = Path(path).suffix
+    candidate = path
+    n = 2
+    while os.path.exists(candidate):
+        candidate = os.path.join(folder, f'{stem} ({n}){suffix}')
+        n += 1
+    return candidate
+
+
 def list_background_images() -> list[str]:
     try:
         files = os.listdir(IMAGES_DIR)
@@ -73,6 +87,28 @@ def list_background_images() -> list[str]:
            if not f.startswith(',') and not f.startswith('.')
            and f.lower().endswith(ALLOWED_IMAGE_EXTS)]
     return sorted(out, key=str.lower)
+
+
+def short_error(exc: Exception, limit: int = 180) -> str:
+    msg = ' '.join(str(exc).split())
+    return (msg[:limit] + '...') if len(msg) > limit else (msg or type(exc).__name__)
+
+
+def safe_relative_pptx_path(name: str, relative_path: str | None = None) -> str:
+    """Safe relative path for uploaded PowerPoints and zip entries."""
+    raw = (relative_path or name or '').replace('\\', '/').strip('/')
+    parts = [
+        core.safe_filename(part)
+        for part in raw.split('/')
+        if part and part not in ('.', '..')
+    ]
+    if not parts:
+        parts = [core.safe_filename(name or 'PowerPoint.pptx')]
+    leaf = parts[-1]
+    if not leaf.lower().endswith(ALLOWED_PPTX_EXTS):
+        leaf = f'{Path(leaf).stem}.pptx'
+    parts[-1] = leaf
+    return '/'.join(parts)
 
 
 def fetch_song_for_request(data: dict) -> dict | None:
@@ -194,6 +230,8 @@ class Handler(BaseHTTPRequestHandler):
             self.handle_spotify_playlist(data)
         elif path == '/api/create_one':
             self.handle_create_one(data)
+        elif path == '/api/change_backgrounds_upload':
+            self.handle_change_backgrounds_upload(data)
         elif path == '/api/download_all':
             self.handle_download_all(data)
         elif path == '/api/save_settings':
@@ -233,6 +271,128 @@ class Handler(BaseHTTPRequestHandler):
             'total': result['total'],
             'note': result.get('note', ''),
         })
+
+    def _background_options_for_request(self, data: dict) -> tuple[dict | None, list[dict]]:
+        bg_name = (data.get('background') or '').strip()
+        all_images = list_background_images()
+        settings = core.load_app_settings()
+        saved_colors = settings.get('background_colors', {}) or {}
+
+        background = None
+        if bg_name and bg_name != 'random' and bg_name in all_images:
+            background = {
+                'image': bg_name,
+                'color_mode': saved_colors.get(bg_name, 'Auto'),
+            }
+
+        saved_selected = settings.get('background_selected', {}) or {}
+        selected_backgrounds = [
+            {'image': n, 'color_mode': saved_colors.get(n, 'Auto')}
+            for n in all_images if saved_selected.get(n, True)
+        ]
+        return background, selected_backgrounds
+
+    def handle_change_backgrounds_upload(self, data: dict) -> None:
+        """Apply a new background to uploaded .pptx files and return downloads."""
+        uploads = data.get('files') or []
+        if not isinstance(uploads, list):
+            uploads = []
+
+        background, selected_backgrounds = self._background_options_for_request(data)
+        changed = []
+        failed = []
+        used_zip_names = set()
+
+        for item in uploads:
+            if not isinstance(item, dict):
+                continue
+            name = os.path.basename((item.get('name') or '').strip())
+            rel = safe_relative_pptx_path(name, item.get('relative_path'))
+            content = item.get('data') or ''
+            if not name.lower().endswith(ALLOWED_PPTX_EXTS):
+                failed.append({'file': name or rel, 'error': 'Only .pptx files are supported.'})
+                continue
+            try:
+                raw = base64.b64decode(content.split(',', 1)[-1])
+            except Exception:
+                failed.append({'file': name or rel, 'error': "Couldn't read the PowerPoint data."})
+                continue
+            if not raw or len(raw) > MAX_UPLOAD_PPTX_BYTES:
+                failed.append({'file': name or rel, 'error': 'PowerPoint is empty or over 80 MB.'})
+                continue
+
+            out_path = ''
+            tmp_in = tempfile.NamedTemporaryFile(
+                suffix='.pptx', prefix='lyrics_slides_upload_', delete=False,
+                dir=_DOWNLOAD_DIR)
+            try:
+                with tmp_in:
+                    tmp_in.write(raw)
+                out_path = os.path.join(_DOWNLOAD_DIR, os.path.basename(rel))
+                out_path = _unique_download_path(out_path)
+                with _BUILD_LOCK:
+                    core.change_powerpoint_background(
+                        tmp_in.name, out_path,
+                        background=background,
+                        selected_backgrounds=selected_backgrounds)
+            except Exception as exc:
+                failed.append({'file': rel, 'error': short_error(exc)})
+                if out_path:
+                    try:
+                        os.remove(out_path)
+                    except Exception:
+                        pass
+                continue
+            finally:
+                try:
+                    os.remove(tmp_in.name)
+                except OSError:
+                    pass
+
+            token = _register_download(out_path)
+            zip_name = rel
+            stem, ext = os.path.splitext(zip_name)
+            n = 2
+            while zip_name in used_zip_names:
+                zip_name = f'{stem} ({n}){ext}'
+                n += 1
+            used_zip_names.add(zip_name)
+            changed.append({
+                'file': os.path.basename(out_path),
+                'source': rel,
+                'download': f'/download/{token}',
+                'zip_name': zip_name,
+                'token': token,
+            })
+
+        zip_download = ''
+        zip_file = ''
+        if len(changed) > 1:
+            zip_path = _unique_download_path(
+                os.path.join(_DOWNLOAD_DIR, 'Changed PowerPoints.zip'))
+            try:
+                with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
+                    for entry in changed:
+                        with _DOWNLOADS_LOCK:
+                            download_entry = _DOWNLOADS.get(entry['token'])
+                        if download_entry and os.path.isfile(download_entry[0]):
+                            zf.write(download_entry[0], entry['zip_name'])
+                zip_token = _register_download(zip_path)
+                zip_download = f'/download/{zip_token}'
+                zip_file = os.path.basename(zip_path)
+            except OSError as exc:
+                failed.append({'file': 'Changed PowerPoints.zip',
+                               'error': f"Couldn't build the zip ({exc})."})
+
+        self._send_json({
+            'ok': bool(changed) and not failed,
+            'changed': changed,
+            'failed': failed,
+            'changed_count': len(changed),
+            'failed_count': len(failed),
+            'zip_download': zip_download,
+            'zip_file': zip_file,
+        }, status=200 if changed else 400)
 
     def handle_create_one(self, data: dict) -> None:
         """Create the .pptx for one song and return a download link."""

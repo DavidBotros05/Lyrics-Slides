@@ -40,7 +40,8 @@
   .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 88px; }
 
   header { display: flex; align-items: center; justify-content: space-between;
-    gap: 16px; margin-bottom: 24px; }
+    gap: 16px; margin-bottom: 26px; padding-bottom: 20px;
+    border-bottom: 1px solid var(--border); }
   .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
   .mark { width: 40px; height: 40px; flex: none; border-radius: 12px;
     display: flex; align-items: center; justify-content: center; font-size: 19px;
@@ -60,9 +61,31 @@
   .card.alert { border-color: rgba(255, 120, 120, .35);
     background: linear-gradient(var(--bad-soft), transparent 70%), var(--panel); }
 
+  .tabs { display: flex; gap: 26px; margin-bottom: 20px;
+    border-bottom: 1px solid var(--border); }
+  .tab-btn {
+    border: none; border-bottom: 2px solid transparent; border-radius: 0;
+    background: transparent; color: var(--muted); padding: 9px 2px;
+    margin-bottom: -1px; font-size: 14px; font-weight: 550;
+  }
+  .tab-btn:hover:not(:disabled) {
+    background: transparent; color: var(--text); border-bottom-color: var(--border-strong);
+  }
+  .tab-btn:active:not(:disabled) { transform: none; }
+  .tab-btn.active {
+    color: var(--text); background: transparent; border-bottom-color: var(--accent);
+  }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+
   .song-head { display: flex; justify-content: space-between; align-items: center;
     gap: 10px; margin-bottom: 12px; }
-  .song-head .num { font-weight: 650; font-size: 15px; letter-spacing: -0.01em; }
+  .song-head .num { display: inline-flex; align-items: center; gap: 10px;
+    font-weight: 650; font-size: 15px; letter-spacing: -0.01em; }
+  .song-idx { display: inline-flex; align-items: center; justify-content: center;
+    width: 25px; height: 25px; border-radius: 8px; font-size: 12.5px; font-weight: 650;
+    background: var(--accent-soft); color: var(--accent);
+    border: 1px solid rgba(141, 126, 248, .22); }
   .song-status { font-size: 12.5px; font-weight: 500; line-height: 1.4;
     padding: 3px 10px; border-radius: 8px; text-align: right;
     background: var(--panel2); color: var(--muted); }
@@ -75,6 +98,8 @@
   .grid2 > div { min-width: 0; }
   .full { grid-column: 1 / -1; }
   @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } }
+  .field { margin-top: 16px; }
+  .field:first-of-type { margin-top: 0; }
   label.fld { display: block; font-size: 12.5px; font-weight: 500;
     color: var(--muted); margin-bottom: 5px; }
   input[type=text], input[type=number], textarea, select {
@@ -89,6 +114,12 @@
     border-color: var(--border-strong); }
   input[type=text]:focus, input[type=number]:focus, textarea:focus, select:focus {
     border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  select {
+    appearance: none; -webkit-appearance: none; cursor: pointer;
+    padding-right: 38px;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8' fill='none' stroke='%238e97ac' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><path d='M1 1.5 6 6.5 11 1.5'/></svg>");
+    background-repeat: no-repeat; background-position: right 14px center;
+  }
   .or { text-align: center; color: var(--muted); font-size: 12px; margin: 8px 0 6px;
         display: flex; align-items: center; gap: 10px; }
   .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
@@ -128,6 +159,10 @@
     border-color: transparent; }
   button.danger:hover:not(:disabled) { border-color: rgba(255, 120, 120, .5);
     color: var(--bad); background: var(--bad-soft); }
+  button.quit-btn { background: transparent; border-color: var(--border);
+    color: var(--muted); padding: 7px 15px; }
+  button.quit-btn:hover:not(:disabled) { color: var(--bad);
+    border-color: rgba(255, 120, 120, .5); background: var(--bad-soft); }
   button:disabled { opacity: .45; cursor: default; }
   .lyr-badge { font-size: 12.5px; font-weight: 500; color: var(--good); }
 
@@ -136,6 +171,33 @@
   .inline-row { align-items: stretch; }
   .inline-row input { flex: 1; min-width: 0; }
   .card, .song-head, .row-btns, .inline-row { min-width: 0; }
+  .choice-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+  .choice-row label { display: inline-flex; align-items: center; gap: 7px;
+    color: var(--muted); font-size: 13px; }
+
+  /* change-sources (PowerPoints to change) */
+  .source-item { background: var(--panel2); border: 1px solid var(--border);
+    border-radius: 11px; padding: 11px 12px; margin-bottom: 10px; }
+  .source-item:last-child { margin-bottom: 0; }
+  .source-top { display: flex; align-items: center; gap: 8px; }
+  .source-top input { flex: 1; min-width: 0; background: var(--panel); }
+  .source-actions { display: flex; align-items: center; gap: 8px;
+    margin-top: 9px; flex-wrap: wrap; }
+  .source-actions .browse { padding: 6px 13px; font-size: 13px;
+    background: transparent; color: var(--muted); }
+  .source-actions .browse:hover:not(:disabled) { color: var(--text);
+    background: var(--panel3); border-color: var(--border-strong); }
+  .sub-toggle { display: inline-flex; align-items: center; gap: 7px;
+    margin-left: auto; color: var(--muted); font-size: 12.5px; cursor: pointer; }
+  .icon-btn { flex: none; width: 34px; height: 34px; padding: 0;
+    font-size: 19px; line-height: 1; display: inline-flex;
+    align-items: center; justify-content: center; color: var(--muted); }
+  .icon-btn.danger:hover:not(:disabled) { color: var(--bad);
+    background: var(--bad-soft); border-color: rgba(255, 120, 120, .5); }
+  .add-source { width: 100%; border-style: dashed; color: var(--muted);
+    background: transparent; padding: 11px; }
+  .add-source:hover:not(:disabled) { color: var(--text);
+    background: var(--panel2); border-color: var(--border-strong); }
 
   .bigbar { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
   .bigbar button.primary { padding: 12px 28px; font-size: 15px; border-radius: 11px; }
@@ -148,7 +210,8 @@
     border: 1px solid var(--border); }
   .mgr-row .nm { flex: 1; font-size: 13.5px; white-space: nowrap;
     overflow: hidden; text-overflow: ellipsis; }
-  .mgr-row select { width: 92px; padding: 6px 8px; font-size: 13px; }
+  .mgr-row select { width: 98px; padding: 6px 28px 6px 10px; font-size: 13px;
+    background-position: right 10px center; }
   .switch { position: relative; width: 38px; height: 22px; flex: 0 0 auto; }
   .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
   .switch .tr { position: absolute; inset: 0; background: var(--border-strong);
@@ -308,7 +371,7 @@
         <div class="sub">Artist + title, or paste a Genius / AZLyrics link</div>
       </div>
     </div>
-    <button class="danger" onclick="quitApp()" title="Stops app.py - same as Ctrl+C in the terminal">Quit</button>
+    <button class="quit-btn" onclick="quitApp()" title="Stops app.py - same as Ctrl+C in the terminal">Quit</button>
   </header>
 
   <div id="fileWarn" style="display:none" class="card alert">
@@ -317,6 +380,12 @@
     Creation folder) - it starts the app and opens the right address in your browser automatically.</div>
   </div>
 
+  <div class="tabs">
+    <button id="createTabBtn" class="tab-btn active" onclick="setTab('create')">Create slides</button>
+    <button id="changeBgTabBtn" class="tab-btn" onclick="setTab('changeBg')">Change backgrounds</button>
+  </div>
+
+  <section id="createTab" class="tab-panel active">
   <div class="card count-card">
     <label style="font-weight:600">How many songs?</label>
     <input type="number" id="songCount" min="1" max="200" value="1"
@@ -340,27 +409,33 @@
 
   <div class="card">
     <h2>Output</h2>
-    <label class="fld">Save PowerPoints to</label>
-    <div class="inline-row">
-      <input type="text" id="outFolder" placeholder="/Users/you/Desktop" style="flex:1"
-             onchange="applyPreviousActionForFolder(); saveSettings(false)">
-      <button onclick="browseFolder()" id="browseBtn">Browse&hellip;</button>
+    <div class="field">
+      <label class="fld">Save PowerPoints to</label>
+      <div class="inline-row">
+        <input type="text" id="outFolder" placeholder="/Users/you/Desktop" style="flex:1"
+               onchange="applyPreviousActionForFolder(); saveSettings(false)">
+        <button onclick="browseFolder()" id="browseBtn">Browse&hellip;</button>
+      </div>
     </div>
-    <label class="fld" style="margin-top:12px">When a PowerPoint is created</label>
-    <select id="storageMode" onchange="saveSettings()">
-      <option value="output_only">Only create it in the chosen folder</option>
-      <option value="both_copies">Create copies in both folders</option>
-      <option value="all_songs_alias">Create it in All Songs and link it here</option>
-    </select>
-    <label class="fld" style="margin-top:12px">Previous-session PowerPoints in this folder</label>
-    <select id="previousPowerpointsAction" onchange="saveSettings()">
-      <option value="keep">Keep them</option>
-      <option value="delete">Delete them</option>
-      <option value="move_to_all_songs">Move them to All Songs</option>
-    </select>
-    <div class="row-btns">
-      <button onclick="savePreviousActionForFolder()">Save for this folder</button>
-      <span class="hint" id="previousFolderStatus"></span>
+    <div class="field">
+      <label class="fld">When a PowerPoint is created</label>
+      <select id="storageMode" onchange="saveSettings()">
+        <option value="output_only">Only create it in the chosen folder</option>
+        <option value="both_copies">Create copies in both folders</option>
+        <option value="all_songs_alias">Create it in All Songs and link it here</option>
+      </select>
+    </div>
+    <div class="field">
+      <label class="fld">Previous-session PowerPoints in this folder</label>
+      <select id="previousPowerpointsAction" onchange="saveSettings()">
+        <option value="keep">Keep them</option>
+        <option value="delete">Delete them</option>
+        <option value="move_to_all_songs">Move them to All Songs</option>
+      </select>
+      <div class="row-btns">
+        <button onclick="savePreviousActionForFolder()">Save for this folder</button>
+        <span class="hint" id="previousFolderStatus"></span>
+      </div>
     </div>
   </div>
 
@@ -371,6 +446,7 @@
       <div class="row-btns">
         <button onclick="document.getElementById('upl').click()">+ Add image&hellip;</button>
         <input type="file" id="upl" accept=".png,.jpg,.jpeg" style="display:none" onchange="uploadBg(this)">
+        <button id="selectAllBtn" onclick="toggleSelectAllBackgrounds()">Select all</button>
         <span class="hint">Toggled-on images form the pool used when a song's background is "Random".
         Text color is normally picked automatically; override it per image here. A contrast shadow +
         outline is always added so lyrics stay readable.</span>
@@ -383,6 +459,58 @@
     <button class="danger" id="stopBtn" style="display:none" onclick="stopCreating()">&#9632; Stop</button>
     <span id="globalStatus" class="hint"></span>
   </div>
+  </section>
+
+  <section id="changeBgTab" class="tab-panel">
+    <div class="card">
+      <h2>PowerPoints to change</h2>
+      <div id="changeSources"></div>
+      <button class="add-source" onclick="addChangeSource()">+ Add another PowerPoint or folder</button>
+      <div class="hint">Pick a PowerPoint file or a whole folder. Folder rows can include or skip nested folders.</div>
+    </div>
+
+    <div class="card">
+      <h2>New background</h2>
+      <label class="fld">Background to apply</label>
+      <div class="bg-strip" id="changeBgStrip"></div>
+      <div class="hint">Random uses the toggled-on images from the background manager below.</div>
+    </div>
+
+    <div class="card">
+      <h2>Save changed PowerPoints</h2>
+      <div class="choice-row">
+        <label><input type="radio" name="changeOutputMode" value="overwrite" checked onchange="syncChangeOutputMode()">Overwrite original files</label>
+        <label><input type="radio" name="changeOutputMode" value="copy_to_folder" onchange="syncChangeOutputMode()">Save to a new folder</label>
+      </div>
+      <div id="changeDestWrap" style="display:none; margin-top:12px">
+        <label class="fld">New folder</label>
+        <div class="inline-row">
+          <input type="text" id="changeDest" placeholder="/Users/you/Desktop/PowerPoints with new backgrounds">
+          <button onclick="browseChangeDest()" id="changeDestBtn">Browse&hellip;</button>
+        </div>
+        <div class="choice-row">
+          <label><input type="checkbox" id="deleteOriginals">Erase original files after saving changed copies</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <details id="changeMgrDetails" open>
+        <summary>Manage backgrounds (random pool, text color, add images)</summary>
+        <div id="changeMgrList"></div>
+        <div class="row-btns">
+          <button onclick="document.getElementById('upl').click()">+ Add image&hellip;</button>
+          <button id="changeSelectAllBtn" onclick="toggleSelectAllBackgrounds()">Select all</button>
+          <span class="hint">Use Adjust to move or stretch each background before applying it to existing PowerPoints.</span>
+        </div>
+      </details>
+    </div>
+
+    <div class="bigbar">
+      <button class="primary" id="changeBgBtn" onclick="changePowerPointBackgrounds()">Change backgrounds</button>
+      <span id="changeBgStatus" class="hint"></span>
+    </div>
+  </section>
 </div>
 
 <!-- lyrics preview / edit modal -->
@@ -441,6 +569,8 @@
 <script>
 let songs = [];          // {artist,title,url,lyrics,source,bg,status,statusCls}
 let backgrounds = [];    // {name,color_mode,selected}
+let changeBg = 'random';
+let changeSources = [{path:'', includeSubfolders:true}];
 let modalIdx = -1;
 let previousPowerpointsByFolder = {};
 
@@ -478,6 +608,14 @@ async function api(path, body, signal) {
   return r.json();
 }
 
+function setTab(tab) {
+  const isChange = tab === 'changeBg';
+  $('createTab').classList.toggle('active', !isChange);
+  $('changeBgTab').classList.toggle('active', isChange);
+  $('createTabBtn').classList.toggle('active', !isChange);
+  $('changeBgTabBtn').classList.toggle('active', isChange);
+}
+
 function newSong() {
   return {artist:'', title:'', url:'', lyrics:'', source:'', bg:'random',
           status:'', statusCls:'', libraryChoices:null};
@@ -513,6 +651,86 @@ async function browseFolder() {
   $('browseBtn').disabled = false;
 }
 
+function addChangeSource(path = '') {
+  changeSources.push({path, includeSubfolders:true});
+  renderChangeSources();
+}
+
+function removeChangeSource(i) {
+  changeSources.splice(i, 1);
+  if (!changeSources.length) changeSources.push({path:'', includeSubfolders:true});
+  renderChangeSources();
+}
+
+function renderChangeSources() {
+  const host = $('changeSources');
+  if (!host) return;
+  host.innerHTML = changeSources.map((src, i) => `
+    <div class="source-item">
+      <div class="source-top">
+        <input type="text" value="${esc(src.path)}"
+               placeholder="Pick a PowerPoint or folder, or type a path"
+               oninput="changeSources[${i}].path=this.value">
+        ${changeSources.length > 1 ? `<button class="icon-btn danger" title="Remove this row" aria-label="Remove this row" onclick="removeChangeSource(${i})">&times;</button>` : ''}
+      </div>
+      <div class="source-actions">
+        <button class="browse" onclick="browseChangePptx(${i}, this)">PowerPoint&hellip;</button>
+        <button class="browse" onclick="browseChangeFolder(${i}, this)">Folder&hellip;</button>
+        <label class="sub-toggle"><input type="checkbox" ${src.includeSubfolders !== false ? 'checked' : ''}
+          onchange="changeSources[${i}].includeSubfolders=this.checked"> Include subfolders</label>
+      </div>
+    </div>`).join('');
+}
+
+function setChangeSourcePath(i, path) {
+  while (changeSources.length <= i) changeSources.push({path:'', includeSubfolders:true});
+  changeSources[i].path = path;
+  renderChangeSources();
+}
+
+async function browseChangePptx(i, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/pick_powerpoint', {});
+    if (r.ok && r.path) setChangeSourcePath(i, r.path);
+    else if (r.ok && r.cancelled) {}
+    else toast(r.error || "Couldn't open the file dialog.");
+  } catch (e) { toast('Server error opening the file dialog.'); }
+  if (btn) btn.disabled = false;
+}
+
+async function browseChangeFolder(i, btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/pick_folder', {prompt: 'Choose a folder of PowerPoints to change'});
+    if (r.ok && r.path) setChangeSourcePath(i, r.path);
+    else if (r.ok && r.cancelled) {}
+    else toast(r.error || "Couldn't open the folder dialog.");
+  } catch (e) { toast('Server error opening the folder dialog.'); }
+  if (btn) btn.disabled = false;
+}
+
+async function browseChangeDest() {
+  $('changeDestBtn').disabled = true;
+  try {
+    const r = await api('/api/pick_folder', {prompt: 'Choose where to save changed PowerPoints'});
+    if (r.ok && r.path) $('changeDest').value = r.path;
+    else if (r.ok && r.cancelled) {}
+    else toast(r.error || "Couldn't open the folder dialog.");
+  } catch (e) { toast('Server error opening the folder dialog.'); }
+  $('changeDestBtn').disabled = false;
+}
+
+function changeOutputMode() {
+  const checked = document.querySelector('input[name="changeOutputMode"]:checked');
+  return checked ? checked.value : 'overwrite';
+}
+
+function syncChangeOutputMode() {
+  const copyMode = changeOutputMode() === 'copy_to_folder';
+  $('changeDestWrap').style.display = copyMode ? '' : 'none';
+}
+
 function outputFolderKey() {
   return $('outFolder').value.trim();
 }
@@ -542,12 +760,14 @@ function esc(s) {
                   .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function jsq(s) { return JSON.stringify(s || ''); }
+
 function bgStrip(i) {
   const s = songs[i];
   let h = `<div class="bg-opt ${s.bg==='random'?'sel':''}" onclick="pickBg(${i},'random')">
              <div class="rand">&#127922;</div><div class="nm">Random</div></div>`;
   for (const b of backgrounds) {
-    h += `<div class="bg-opt ${s.bg===b.name?'sel':''}" onclick="pickBg(${i},'${esc(b.name)}')">
+    h += `<div class="bg-opt ${s.bg===b.name?'sel':''}" onclick="pickBg(${i},${jsq(b.name)})">
             <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
             <div class="nm" title="${esc(b.name)}">${esc(b.name)}</div></div>`;
   }
@@ -555,6 +775,21 @@ function bgStrip(i) {
 }
 
 function pickBg(i, name) { songs[i].bg = name; render(); }
+
+function renderChangeBgStrip() {
+  const host = $('changeBgStrip');
+  if (!host) return;
+  let h = `<div class="bg-opt ${changeBg==='random'?'sel':''}" onclick="pickChangeBg('random')">
+             <div class="rand">&#127922;</div><div class="nm">Random</div></div>`;
+  for (const b of backgrounds) {
+    h += `<div class="bg-opt ${changeBg===b.name?'sel':''}" onclick="pickChangeBg(${jsq(b.name)})">
+            <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
+            <div class="nm" title="${esc(b.name)}">${esc(b.name)}</div></div>`;
+  }
+  host.innerHTML = h;
+}
+
+function pickChangeBg(name) { changeBg = name; renderChangeBgStrip(); }
 
 function libraryChoiceButtons(i, s) {
   if (!s.libraryChoices || !s.libraryChoices.length) return '';
@@ -570,7 +805,7 @@ function render() {
   host.innerHTML = songs.map((s, i) => `
     <div class="card">
       <div class="song-head">
-        <span class="num">Song ${i + 1}</span>
+        <span class="num"><span class="song-idx">${i + 1}</span>Song</span>
         <span class="song-status ${s.statusCls}">${s.status}</span>
       </div>
       <div class="grid2">
@@ -845,21 +1080,88 @@ async function createAll() {
   toast((stopRequested ? 'Stopped: ' : 'Done: ') + bits.join(', ') + '.');
 }
 
+async function changePowerPointBackgrounds() {
+  const sourceItems = changeSources
+    .map(s => ({path: (s.path || '').trim(), include_subfolders: s.includeSubfolders !== false}))
+    .filter(s => s.path);
+  if (!sourceItems.length) { toast('Choose at least one PowerPoint or folder first.'); return; }
+  const mode = changeOutputMode();
+  const dest = $('changeDest').value.trim();
+  if (mode === 'copy_to_folder' && !dest) {
+    toast('Choose the folder for changed PowerPoints.');
+    return;
+  }
+
+  $('changeBgBtn').disabled = true;
+  $('changeBgStatus').innerHTML = '<span class="spin"></span>Changing backgrounds...';
+  try {
+    await saveSettings();
+    const r = await api('/api/change_backgrounds', {
+      source_items: sourceItems,
+      background: changeBg,
+      output_mode: mode,
+      output_folder: dest,
+      delete_original: $('deleteOriginals').checked,
+    });
+    const changed = r.changed_count || 0;
+    const failed = r.failed_count || 0;
+    if (r.ok) {
+      const erased = r.deleted_originals ? ', originals erased' : '';
+      $('changeBgStatus').textContent = `Done - ${changed} changed${erased}.`;
+      toast(`Changed ${changed} PowerPoint${changed === 1 ? '' : 's'}.`);
+    } else {
+      const first = r.failed && r.failed[0] ? ` ${r.failed[0].error}` : '';
+      $('changeBgStatus').textContent = `Changed ${changed}; ${failed} failed.${first}`;
+      toast(`Some PowerPoints failed: ${failed}.`);
+    }
+  } catch (e) {
+    $('changeBgStatus').textContent = 'Server error changing backgrounds.';
+    toast('Server error changing backgrounds.');
+  }
+  $('changeBgBtn').disabled = false;
+}
+
 /* ---------- backgrounds manager ---------- */
 function renderMgr() {
-  $('mgrList').innerHTML = backgrounds.map((b, i) => `
+  const html = backgrounds.map((b, i) => `
     <div class="mgr-row">
       <label class="switch"><input type="checkbox" ${b.selected ? 'checked' : ''}
-        onchange="backgrounds[${i}].selected=this.checked; saveSettings()">
+        onchange="backgrounds[${i}].selected=this.checked; renderMgr(); renderChangeBgStrip(); saveSettings()">
         <span class="tr"></span></label>
       <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
       <span class="nm">${esc(b.name)}</span>
       <button onclick="openAdjust(${i})" style="padding:5px 12px; font-size:13px">Adjust</button>
-      <select onchange="backgrounds[${i}].color_mode=this.value; saveSettings()">
+      <select onchange="backgrounds[${i}].color_mode=this.value; renderMgr(); saveSettings()">
         ${['Auto','Black','White'].map(m =>
           `<option ${b.color_mode === m ? 'selected' : ''}>${m}</option>`).join('')}
       </select>
     </div>`).join('') || '<div class="hint">No images yet - add one below.</div>';
+  $('mgrList').innerHTML = html;
+  $('changeMgrList').innerHTML = html;
+  renderChangeBgStrip();
+  updateSelectAllBtns();
+}
+
+function allBackgroundsSelected() {
+  return backgrounds.length > 0 && backgrounds.every(b => b.selected);
+}
+
+function updateSelectAllBtns() {
+  const label = allBackgroundsSelected() ? 'Unselect all' : 'Select all';
+  for (const id of ['selectAllBtn', 'changeSelectAllBtn']) {
+    const btn = $(id);
+    if (!btn) continue;
+    btn.textContent = label;
+    btn.disabled = backgrounds.length === 0;
+  }
+}
+
+function toggleSelectAllBackgrounds() {
+  if (!backgrounds.length) return;
+  const target = !allBackgroundsSelected();
+  for (const b of backgrounds) b.selected = target;
+  renderMgr();
+  saveSettings();
 }
 
 async function saveSettings(saveGlobalPreviousAction = true) {
@@ -1033,6 +1335,8 @@ async function loadBackgrounds() {
   } catch (e) {
     $('fileWarn').style.display = 'block';
   }
+  syncChangeOutputMode();
+  renderChangeSources();
   render();
 })();
 
