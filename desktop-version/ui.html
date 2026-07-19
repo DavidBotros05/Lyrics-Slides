@@ -202,6 +202,28 @@
   .bigbar { display: flex; gap: 10px; align-items: center; margin-top: 20px; }
   .bigbar button.primary { padding: 12px 28px; font-size: 15px; border-radius: 11px; }
 
+  .queue-card { border-color: rgba(141, 126, 248, .36); }
+  .queue-head { display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 6px; }
+  .queue-head h2 { margin: 0; }
+  .queue-count { color: var(--muted); font-size: 12.5px; }
+  .queue-item { display: flex; align-items: center; gap: 12px; padding: 10px 0;
+    border-bottom: 1px solid var(--border); }
+  .queue-item:last-child { border-bottom: 0; padding-bottom: 0; }
+  .queue-order { width: 25px; height: 25px; flex: none; display: inline-flex;
+    align-items: center; justify-content: center; border-radius: 8px;
+    background: var(--panel2); color: var(--muted); font-size: 12px;
+    font-variant-numeric: tabular-nums; }
+  .queue-item.active .queue-order { color: var(--warn); background: var(--warn-soft); }
+  .queue-song { min-width: 0; flex: 1; }
+  .queue-title { font-weight: 600; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; }
+  .queue-artist { color: var(--muted); font-size: 12.5px; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; }
+  .queue-state { color: var(--muted); font-size: 12.5px; flex: none; }
+  .queue-item.active .queue-state { color: var(--warn); }
+  .queue-remove { padding: 6px 11px; font-size: 12.5px; }
+
   /* backgrounds manager */
   .mgr-row { display: flex; align-items: center; gap: 12px; padding: 9px 6px;
     border-bottom: 1px solid var(--border); }
@@ -244,6 +266,21 @@
     line-height: 1.55; white-space: pre; }
   .modal .mrow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
   .modal .mbtns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+  .completion-modal { width: 440px; align-items: center; text-align: center; padding: 28px; }
+  .completion-icon { width: 46px; height: 46px; display: inline-flex;
+    align-items: center; justify-content: center; margin-bottom: 16px;
+    border-radius: 50%; font-size: 22px; font-weight: 700; }
+  .completion-modal.success .completion-icon { color: var(--good); background: var(--good-soft); }
+  .completion-modal.attention .completion-icon { color: var(--warn); background: var(--warn-soft); }
+  .completion-modal h3 { font-size: 18px; margin-bottom: 7px; }
+  .completion-message { color: var(--muted); margin: 0; max-width: 36ch; text-wrap: pretty; }
+  .completion-breakdown { display: flex; justify-content: center; gap: 7px;
+    flex-wrap: wrap; margin-top: 18px; }
+  .completion-breakdown:empty { display: none; }
+  .completion-detail { padding: 5px 9px; border-radius: 8px; font-size: 12.5px;
+    color: var(--text); background: var(--panel2); }
+  .completion-modal .mbtns { width: 100%; justify-content: center; margin-top: 22px; }
+  .completion-modal .mbtns button { min-width: 112px; }
   @keyframes fade-in { from { opacity: 0; } }
   @keyframes modal-in { from { transform: scale(.97); opacity: 0; } }
 
@@ -310,6 +347,8 @@
     .row-btns .danger[style*="margin-left:auto"] { margin-left: 0 !important; }
     .bigbar { align-items: stretch; flex-direction: column; gap: 8px; }
     .bigbar button.primary { width: 100%; padding: 12px 18px; }
+    .queue-item { align-items: flex-start; }
+    .queue-state { display: none; }
 
     .mgr-row {
       display: grid; grid-template-columns: 64px 1fr auto;
@@ -330,6 +369,9 @@
     }
     .modal .mbtns { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .modal .mbtns button { width: 100%; }
+    .completion-modal { padding: 24px 18px 18px; }
+    .completion-modal .mbtns { display: flex; }
+    .completion-modal .mbtns button { width: 100%; }
     #mFetchBtn { grid-column: 1 / -1; margin-right: 0 !important; }
     #adjStage { height: min(58vw, 300px); }
     .adj-controls { flex-direction: column; gap: 10px; }
@@ -400,12 +442,21 @@
       <input type="text" id="spotifyLink" placeholder="https://open.spotify.com/playlist/..."
              style="flex:1" onkeydown="if(event.key==='Enter')importSpotify()">
       <button onclick="importSpotify()" id="spotifyBtn">Import songs</button>
+      <button onclick="importLastSpotify()" id="lastSpotifyBtn" disabled>Import last playlist</button>
     </div>
     <div class="hint" id="spotifyStatus">Paste a public playlist (or album) link - every song and its
       artist is added as a row below. No Spotify login needed. Lyrics are then looked up per song as usual.</div>
   </div>
 
   <div id="songs"></div>
+
+  <div class="card queue-card" id="queuePanel" hidden aria-live="polite">
+    <div class="queue-head">
+      <h2>Creation queue</h2>
+      <span class="queue-count" id="queueCount"></span>
+    </div>
+    <div id="queueList"></div>
+  </div>
 
   <div class="card">
     <h2>Output</h2>
@@ -455,7 +506,7 @@
   </div>
 
   <div class="bigbar">
-    <button class="primary" id="createBtn" onclick="createAll()">Create PowerPoints</button>
+    <button class="primary" id="createBtn" onclick="createAll()">Queue all filled songs</button>
     <button class="danger" id="stopBtn" style="display:none" onclick="stopCreating()">&#9632; Stop</button>
     <span id="globalStatus" class="hint"></span>
   </div>
@@ -564,6 +615,21 @@
   </div>
 </div>
 
+<!-- shown only when the creation queue has completely finished -->
+<div class="overlay" id="completionOv" role="dialog" aria-modal="true"
+     aria-labelledby="completionTitle" aria-describedby="completionMessage"
+     onclick="if(event.target===this)closeCompletionPopup()">
+  <div class="modal completion-modal success">
+    <div class="completion-icon" id="completionIcon" aria-hidden="true">&#10003;</div>
+    <h3 id="completionTitle">All done</h3>
+    <p class="completion-message" id="completionMessage"></p>
+    <div class="completion-breakdown" id="completionBreakdown"></div>
+    <div class="mbtns">
+      <button class="primary" id="completionCloseBtn" onclick="closeCompletionPopup()">Done</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -573,12 +639,69 @@ let changeBg = 'random';
 let changeSources = [{path:'', includeSubfolders:true}];
 let modalIdx = -1;
 let previousPowerpointsByFolder = {};
+let lastSpotifyPlaylistLink = '';
+let creationQueue = [];
+let activeQueueSong = null;
+let queueRunning = false;
+let stoppedWaitingCount = 0;
+let stoppedWaitingSongs = [];
+let unresolvedSongs = new Set();
+let deferredQueueSongs = new Set();
+let currentRunSongs = new Set();
+let completionPreviousFocus = null;
+const COMPLETION_POPUP_MIN_SONGS = 3;
 
 const $ = id => document.getElementById(id);
 
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.style.display = 'block';
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3200);
+}
+
+function closeCompletionPopup() {
+  const overlay = $('completionOv');
+  if (!overlay.classList.contains('show')) return;
+  overlay.classList.remove('show');
+  if (completionPreviousFocus && document.contains(completionPreviousFocus) &&
+      !completionPreviousFocus.disabled && completionPreviousFocus.getClientRects().length) {
+    completionPreviousFocus.focus();
+  } else {
+    $('createBtn').focus();
+  }
+  completionPreviousFocus = null;
+}
+
+function showCompletionPopup({made, failed, stopped, choices, unresolved,
+                              unsuccessful, runSongCount}) {
+  if (runSongCount < COMPLETION_POPUP_MIN_SONGS ||
+      queueRunning || activeQueueSong || creationQueue.length) return;
+
+  completionPreviousFocus = document.activeElement;
+  const modal = $('completionOv').querySelector('.completion-modal');
+  const hasProblems = unsuccessful > 0;
+  modal.classList.toggle('success', !hasProblems);
+  modal.classList.toggle('attention', hasProblems);
+  $('completionIcon').innerHTML = hasProblems ? '!' : '&#10003;';
+  $('completionTitle').textContent = hasProblems
+      ? `${unsuccessful} song${unsuccessful === 1 ? ' was' : 's were'} unsuccessful`
+      : 'All done';
+  $('completionMessage').textContent = hasProblems
+      ? `${unsuccessful === 1 ? 'This song is' : 'These songs are'} grouped at the end of the list so ${unsuccessful === 1 ? 'it is' : 'they are'} easy to find.`
+      : `${made} song${made === 1 ? '' : 's'} completed successfully.`;
+
+  const details = [];
+  if (failed) details.push(`${failed} failed`);
+  if (stopped) details.push(`${stopped} stopped`);
+  if (choices) details.push(`${choices} ${choices === 1 ? 'needs' : 'need'} a choice`);
+  if (unresolved) details.push(`${unresolved} unresolved`);
+  $('completionBreakdown').innerHTML = details
+      .map(detail => `<span class="completion-detail">${esc(detail)}</span>`)
+      .join('');
+
+  $('completionOv').classList.add('show');
+  requestAnimationFrame(() => {
+    if ($('completionOv').classList.contains('show')) $('completionCloseBtn').focus();
+  });
 }
 
 /* ---- keep-alive heartbeat: lets app.py stop itself when the tab closes ---- */
@@ -623,6 +746,11 @@ function newSong() {
 
 function setSongCount(n) {
   n = Math.max(1, Math.min(200, parseInt(n, 10) || 1));
+  if (queueRunning && n < songs.length) {
+    $('songCount').value = songs.length;
+    toast('Wait for the creation queue to finish before removing song rows.');
+    return;
+  }
   $('songCount').value = n;
   while (songs.length < n) songs.push(newSong());
   if (songs.length > n) songs.length = n;   // trims from the bottom
@@ -630,10 +758,18 @@ function setSongCount(n) {
 }
 
 function removeSong(i) {
+  if (songs[i] === activeQueueSong) {
+    toast('This song is being created. Stop the queue before removing it.');
+    return;
+  }
+  creationQueue = creationQueue.filter(s => s !== songs[i]);
+  unresolvedSongs.delete(songs[i]);
+  deferredQueueSongs.delete(songs[i]);
   songs.splice(i, 1);
   if (!songs.length) songs.push(newSong());
   $('songCount').value = songs.length;
   render();
+  updateQueueProgress();
 }
 
 async function browseFolder() {
@@ -800,13 +936,61 @@ function libraryChoiceButtons(i, s) {
   return `${choices}<button onclick="fetchNewVersion(${i})">Fetch new version</button>`;
 }
 
+function queueStatus(s) {
+  if (s === activeQueueSong) return {text: 'Creating now', cls: 'busy'};
+  const pos = creationQueue.indexOf(s);
+  if (pos >= 0) return {text: `Queued · ${pos + 1} waiting`, cls: 'busy'};
+  return {text: s.status, cls: s.statusCls};
+}
+
+function queueButton(i, s) {
+  if (s === activeQueueSong) {
+    return '<button class="primary" disabled><span class="spin"></span>Creating</button>';
+  }
+  if (creationQueue.includes(s)) {
+    return `<button onclick="removeFromCreationQueue(${i})">Remove from queue</button>`;
+  }
+  return `<button class="primary" onclick="createSong(${i})">Create this song</button>`;
+}
+
+function renderQueuePanel() {
+  const panel = $('queuePanel');
+  if (!panel) return;
+  const queued = activeQueueSong ? [activeQueueSong, ...creationQueue] : [...creationQueue];
+  panel.hidden = queued.length === 0;
+  if (!queued.length) return;
+
+  const waiting = creationQueue.length;
+  $('queueCount').textContent = activeQueueSong
+      ? `1 creating · ${waiting} waiting`
+      : `${waiting} waiting`;
+  $('queueList').innerHTML = queued.map(s => {
+    const active = s === activeQueueSong;
+    const songIdx = songs.indexOf(s);
+    const title = s.title || (s.url ? 'Song from link' : `Song ${songIdx + 1}`);
+    const artist = s.artist || 'Artist not entered';
+    const waitingPosition = active ? 0 : creationQueue.indexOf(s) + 1;
+    return `<div class="queue-item ${active ? 'active' : ''}">
+      <span class="queue-order">${active ? '<span class="spin"></span>' : waitingPosition}</span>
+      <div class="queue-song">
+        <div class="queue-title">${esc(title)}</div>
+        <div class="queue-artist">${esc(artist)}</div>
+      </div>
+      <span class="queue-state">${active ? 'Creating now' : `Waiting · #${waitingPosition}`}</span>
+      ${active ? '' : `<button class="queue-remove" onclick="removeFromCreationQueue(${songIdx})">Remove</button>`}
+    </div>`;
+  }).join('');
+}
+
 function render() {
   const host = $('songs');
-  host.innerHTML = songs.map((s, i) => `
+  host.innerHTML = songs.map((s, i) => {
+    const shownStatus = queueStatus(s);
+    return `
     <div class="card">
       <div class="song-head">
         <span class="num"><span class="song-idx">${i + 1}</span>Song</span>
-        <span class="song-status ${s.statusCls}">${s.status}</span>
+        <span class="song-status ${shownStatus.cls}">${shownStatus.text}</span>
       </div>
       <div class="grid2">
         <div><label class="fld">Artist</label>
@@ -825,26 +1009,66 @@ function render() {
       </div>
       <div class="row-btns">
         <button onclick="openLyricsModal(${i})">${s.lyrics ? 'Edit lyrics' : 'Paste lyrics'}</button>
-        <button class="primary" onclick="createSong(${i})">Create this song</button>
+        ${queueButton(i, s)}
         ${libraryChoiceButtons(i, s)}
         ${s.statusCls === 'err' ? `<button onclick="retrySong(${i})">&#8635; Retry</button>` : ''}
         ${s.lyrics ? `<span class="lyr-badge">&#10003; Lyrics ready${s.source ? ' (' + esc(s.source) + ')' : ''}</span>
                       <button onclick="clearLyrics(${i})">Clear</button>` : ''}
         ${songs.length > 1 ? `<button class="danger" style="margin-left:auto" onclick="removeSong(${i})">Remove</button>` : ''}
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
+  renderQueuePanel();
 }
 
-function setStatus(i, msg, cls) { songs[i].status = msg; songs[i].statusCls = cls || ''; render(); }
+function setSongStatus(s, msg, cls) {
+  if (!s) return;
+  s.status = msg;
+  s.statusCls = cls || '';
+  render();
+}
+
+function regroupUncreatedSongs() {
+  const currentSongs = new Set(songs);
+  unresolvedSongs.forEach(song => {
+    if (!currentSongs.has(song)) unresolvedSongs.delete(song);
+  });
+  songs = songs.filter(song => !unresolvedSongs.has(song))
+               .concat(songs.filter(song => unresolvedSongs.has(song)));
+  $('songCount').value = songs.length;
+}
+
+function setStatus(i, msg, cls) { setSongStatus(songs[i], msg, cls); }
 
 function hasInput(s) { return (s.artist.trim() && s.title.trim()) || s.url.trim() || s.lyrics.trim(); }
 
 /* ---------- Spotify playlist import ---------- */
-async function importSpotify() {
-  const link = $('spotifyLink').value.trim();
+function updateLastSpotifyButton() {
+  const btn = $('lastSpotifyBtn');
+  btn.disabled = !lastSpotifyPlaylistLink;
+  btn.title = lastSpotifyPlaylistLink
+      ? `Import again: ${lastSpotifyPlaylistLink}`
+      : 'Import a Spotify playlist once to enable this button.';
+}
+
+function setSpotifyImportBusy(busy) {
+  $('spotifyBtn').disabled = busy;
+  $('lastSpotifyBtn').disabled = busy || !lastSpotifyPlaylistLink;
+}
+
+function importLastSpotify() {
+  if (!lastSpotifyPlaylistLink) {
+    toast('Import a Spotify playlist first.');
+    return;
+  }
+  importSpotify(lastSpotifyPlaylistLink);
+}
+
+async function importSpotify(savedLink = '') {
+  const link = (savedLink || $('spotifyLink').value).trim();
   if (!link) { toast('Paste a Spotify playlist link first.'); return; }
 
-  $('spotifyBtn').disabled = true;
+  setSpotifyImportBusy(true);
   $('spotifyStatus').innerHTML = '<span class="spin"></span>Reading the playlist&hellip;';
   try {
     const r = await api('/api/spotify_playlist', {link});
@@ -852,6 +1076,7 @@ async function importSpotify() {
       $('spotifyStatus').textContent = r.error || "Couldn't read that playlist.";
       toast(r.error || "Couldn't read that playlist.");
     } else {
+      lastSpotifyPlaylistLink = link;
       const rows = r.tracks.map(t =>
         Object.assign(newSong(), {artist: t.artist, title: t.title}));
       // Replace the rows if nothing was typed yet; otherwise add to the end.
@@ -863,12 +1088,13 @@ async function importSpotify() {
       $('spotifyStatus').textContent = msg;
       $('spotifyLink').value = '';
       render();
-      toast(`Added ${r.tracks.length} songs from "${r.name}".`);
+      toast(`Added ${r.tracks.length} song${r.tracks.length === 1 ? '' : 's'} from "${r.name}".`);
     }
   } catch (e) {
     $('spotifyStatus').textContent = 'Server error reading the playlist.';
   }
-  $('spotifyBtn').disabled = false;
+  setSpotifyImportBusy(false);
+  updateLastSpotifyButton();
 }
 
 /* ---------- lyrics modal (manual paste first; fetch only on demand) ---------- */
@@ -939,13 +1165,22 @@ let currentFetchCtrl = null;
 
 function stopCreating() {
   stopRequested = true;
+  const waiting = [...creationQueue];
+  stoppedWaitingSongs = waiting;
+  stoppedWaitingCount = waiting.length;
+  creationQueue = [];
+  for (const s of waiting) {
+    s.status = 'Removed from queue (stopped)';
+    s.statusCls = '';
+  }
   $('stopBtn').disabled = true;
   $('globalStatus').textContent = 'Stopping...';
   if (currentFetchCtrl) currentFetchCtrl.abort();
+  render();
 }
 
 async function createOne(s, i) {
-  setStatus(i, 'Working...', 'busy');
+  setSongStatus(s, 'Working...', 'busy');
   try {
     currentFetchCtrl = new AbortController();
     const r = await api('/api/create_one', {
@@ -954,130 +1189,225 @@ async function createOne(s, i) {
       output_folder: $('outFolder').value,
       storage_mode: $('storageMode').value,
       previous_powerpoints_action: $('previousPowerpointsAction').value,
+      preserve_songs: songs.filter(hasInput).map(song => ({
+        artist: song.artist, title: song.title, url: song.url,
+      })),
       library_path: s._libraryPath || '',
+      skip_output: !!s._skipOutput,
       skip_library: !!s._skipLibrary,
     }, currentFetchCtrl.signal);
     currentFetchCtrl = null;
     if (r.ok) {
-      const suffix = r.source === 'All Songs library'
+      const suffix = r.source === 'Chosen output folder'
+          ? ' - already in the chosen folder'
+          : r.source === 'All Songs library'
           ? (r.delivery === 'linked'
               ? ' - linked from All Songs library'
               : ' - copied from All Songs library')
           : (r.source ? ' - lyrics from ' + r.source : '');
       s.libraryChoices = null;
       s._libraryPath = '';
+      s._skipOutput = false;
       s._skipLibrary = false;
-      setStatus(i, `Saved: ${r.file}${suffix}`, 'ok');
+      setSongStatus(s, `Saved: ${r.file}${suffix}`, 'ok');
       return 'ok';
     }
     if (r.needs_choice) {
       s.libraryChoices = r.choices || [];
+      s.libraryChoiceSource = r.choice_source || 'all_songs';
       s._libraryPath = '';
+      s._skipOutput = false;
       s._skipLibrary = false;
-      setStatus(i, 'Choose a saved version, or fetch a new one', 'busy');
-      toast(`Song ${i + 1}: choose a saved version or fetch a new one.`);
+      setSongStatus(s, 'Choose a saved version, or fetch a new one', 'busy');
+      const row = songs.indexOf(s);
+      toast(`Song ${row + 1}: choose a saved version or fetch a new one.`);
       return 'choice';
     }
-    setStatus(i, r.error || 'Failed', 'err');
-    if (r.needs_lyrics) toast(`Song ${i + 1}: not found - use "Paste lyrics" to add them manually.`);
+    setSongStatus(s, r.error || 'Failed', 'err');
+    if (r.needs_lyrics) {
+      const row = songs.indexOf(s);
+      toast(`Song ${row + 1}: not found - use "Paste lyrics" to add them manually.`);
+    }
     return 'fail';
   } catch (e) {
     currentFetchCtrl = null;
     if (stopRequested || e.name === 'AbortError') {
-      setStatus(i, 'Stopped (this song may still have been saved)', 'err');
+      setSongStatus(s, 'Stopped (this song may still have been saved)', 'err');
       return 'stopped';
     }
-    setStatus(i, 'Server error', 'err');
+    setSongStatus(s, 'Server error', 'err');
     return 'fail';
   }
 }
 
-async function retrySong(i) {
-  return createSong(i, 'Still failing - check the error on the song row.');
-}
+function retrySong(i) { createSong(i); }
 
-async function chooseLibrarySong(i, choiceIdx) {
-  if ($('createBtn').disabled) {
-    toast('The batch is still running. Choose after it finishes.');
-    return;
-  }
+function chooseLibrarySong(i, choiceIdx) {
   const choice = songs[i].libraryChoices && songs[i].libraryChoices[choiceIdx];
   if (!choice) return;
   songs[i]._libraryPath = choice.path;
+  songs[i]._skipOutput = false;
   songs[i]._skipLibrary = false;
   songs[i].libraryChoices = null;
-  await createSong(i);
+  songs[i].libraryChoiceSource = '';
+  createSong(i);
 }
 
-async function fetchNewVersion(i) {
-  if ($('createBtn').disabled) {
-    toast('The batch is still running. Choose after it finishes.');
-    return;
-  }
+function fetchNewVersion(i) {
   songs[i]._libraryPath = '';
+  songs[i]._skipOutput = songs[i].libraryChoiceSource === 'output';
   songs[i]._skipLibrary = true;
   songs[i].libraryChoices = null;
-  await createSong(i);
+  songs[i].libraryChoiceSource = '';
+  createSong(i);
 }
 
-async function createSong(i, failToast) {
-  if ($('createBtn').disabled) return;   // a batch is already running
-  if (!hasInput(songs[i])) { toast('Fill in the song first.'); return; }
-  stopRequested = false;
-  $('createBtn').disabled = true;
-  $('stopBtn').style.display = '';
-  $('stopBtn').disabled = false;
-  $('globalStatus').textContent = `Creating song ${i + 1}...`;
-  let res = 'fail';
-  try {
-    await saveSettings();
-    res = await createOne(songs[i], i);
-  } finally {
-    $('createBtn').disabled = false;
-    $('stopBtn').style.display = 'none';
+function removeFromCreationQueue(i) {
+  const s = songs[i];
+  if (!s || s === activeQueueSong) return;
+  const before = creationQueue.length;
+  creationQueue = creationQueue.filter(queued => queued !== s);
+  if (creationQueue.length !== before) {
+    unresolvedSongs.add(s);
+    deferredQueueSongs.add(s);
+    regroupUncreatedSongs();
+    render();
+    updateQueueProgress();
+    toast('Song removed from the creation queue.');
   }
-  $('globalStatus').textContent = res === 'ok'
-      ? `Song ${i + 1} created.`
-      : `Song ${i + 1} did not finish.`;
-  if (res !== 'ok') toast(failToast || 'Check the error on the song row.');
 }
 
-async function createAll() {
-  const todo = songs.map((s, i) => [s, i]).filter(([s]) => hasInput(s));
-  if (!todo.length) { toast('Fill in at least one song first.'); return; }
+function updateQueueProgress() {
+  if (!queueRunning) return;
+  const waiting = creationQueue.length;
+  const title = activeQueueSong && (activeQueueSong.title || activeQueueSong.artist);
+  $('globalStatus').textContent = title
+      ? `Creating “${title}” · ${waiting} waiting`
+      : `Creating song · ${waiting} waiting`;
+}
 
-  await saveSettings();
+function createSong(i) {
+  const s = songs[i];
+  if (!s || !hasInput(s)) { toast('Fill in the song first.'); return; }
+  if (s === activeQueueSong || creationQueue.includes(s)) return;
+  if (queueRunning && stopRequested) {
+    toast('Wait for the current song to stop, then queue this song.');
+    return;
+  }
+
+  creationQueue.push(s);
+  if (queueRunning) currentRunSongs.add(s);
+  deferredQueueSongs.delete(s);
+  render();
+  updateQueueProgress();
+  toast(queueRunning
+      ? `Added song ${i + 1} to the queue.`
+      : `Song ${i + 1} queued for creation.`);
+  if (!queueRunning) processCreationQueue();
+}
+
+function createAll() {
+  const todo = songs.filter(s =>
+    hasInput(s) && s !== activeQueueSong && !creationQueue.includes(s));
+  if (!todo.length) {
+    toast(queueRunning ? 'All filled songs are already queued.' : 'Fill in at least one song first.');
+    return;
+  }
+
+  creationQueue.push(...todo);
+  if (queueRunning) todo.forEach(song => currentRunSongs.add(song));
+  todo.forEach(song => deferredQueueSongs.delete(song));
+  render();
+  updateQueueProgress();
+  toast(`Added ${todo.length} song${todo.length === 1 ? '' : 's'} to the queue.`);
+  if (!queueRunning) processCreationQueue();
+}
+
+async function processCreationQueue() {
+  if (queueRunning) return;
+
+  queueRunning = true;
   stopRequested = false;
-  $('createBtn').disabled = true;
+  stoppedWaitingCount = 0;
+  stoppedWaitingSongs = [];
+  deferredQueueSongs = new Set();
+  // Count every unique song that participates in this run, including songs
+  // added while another song is already being created.
+  currentRunSongs = new Set(creationQueue);
   $('stopBtn').style.display = '';
   $('stopBtn').disabled = false;
   let made = 0, failed = 0, skipped = 0, choices = 0;
   const moveToEnd = new Set();
 
-  for (const [s, i] of todo) {
-    if (stopRequested) { skipped++; setStatus(i, 'Skipped (stopped)', ''); continue; }
-    $('globalStatus').textContent = `Creating ${made + failed + skipped + choices + 1} of ${todo.length}...`;
-    const res = await createOne(s, i);
-    if (res === 'ok') made++;
-    else if (res === 'stopped') skipped++;
-    else if (res === 'choice') { choices++; moveToEnd.add(s); }
-    else { failed++; moveToEnd.add(s); }
+  try {
+    await saveSettings();
+    while (creationQueue.length && !stopRequested) {
+      const s = creationQueue.shift();
+      if (!songs.includes(s)) continue;
+      activeQueueSong = s;
+      render();
+      updateQueueProgress();
+      const res = await createOne(s, songs.indexOf(s));
+      activeQueueSong = null;
+      if (res === 'ok') { made++; unresolvedSongs.delete(s); }
+      else if (res === 'stopped') { skipped++; moveToEnd.add(s); }
+      else if (res === 'choice') { choices++; moveToEnd.add(s); }
+      else { failed++; moveToEnd.add(s); }
+      render();
+    }
+  } catch (e) {
+    if (activeQueueSong) {
+      activeQueueSong.status = 'Queue stopped unexpectedly';
+      activeQueueSong.statusCls = 'err';
+      moveToEnd.add(activeQueueSong);
+      failed++;
+    }
+    const pending = [...creationQueue];
+    creationQueue = [];
+    for (const s of pending) {
+      s.status = 'Queue could not start';
+      s.statusCls = 'err';
+      moveToEnd.add(s);
+    }
+    failed += pending.length || (activeQueueSong ? 0 : 1);
+    $('globalStatus').textContent = 'The creation queue could not start.';
+    toast('Server error starting the creation queue.');
+  } finally {
+    activeQueueSong = null;
+    currentFetchCtrl = null;
+    queueRunning = false;
+    $('stopBtn').style.display = 'none';
+    $('stopBtn').disabled = false;
   }
 
-  if (moveToEnd.size) {
-    songs = songs.filter(s => !moveToEnd.has(s))
-                 .concat(songs.filter(s => moveToEnd.has(s)));
+  stoppedWaitingSongs.forEach(song => moveToEnd.add(song));
+  deferredQueueSongs.forEach(song => moveToEnd.add(song));
+  moveToEnd.forEach(song => unresolvedSongs.add(song));
+  if (moveToEnd.size || unresolvedSongs.size) {
+    regroupUncreatedSongs();
     render();
   }
 
-  $('createBtn').disabled = false;
-  $('stopBtn').style.display = 'none';
+  skipped += stoppedWaitingCount;
+  stoppedWaitingCount = 0;
+  stoppedWaitingSongs = [];
   const bits = [`${made} created`];
   if (failed) bits.push(`${failed} failed`);
   if (skipped) bits.push(`${skipped} stopped`);
   if (choices) bits.push(`${choices} need a choice`);
+  if (deferredQueueSongs.size) bits.push(`${deferredQueueSongs.size} unresolved`);
   $('globalStatus').textContent = (stopRequested ? 'Stopped - ' : 'Done - ') + bits.join(', ') + '.';
-  toast((stopRequested ? 'Stopped: ' : 'Done: ') + bits.join(', ') + '.');
+  const unsuccessful = moveToEnd.size;
+  showCompletionPopup({
+    made, failed, stopped: skipped, choices,
+    unresolved: deferredQueueSongs.size,
+    unsuccessful,
+    runSongCount: currentRunSongs.size,
+  });
+  stopRequested = false;
+  deferredQueueSongs = new Set();
+  currentRunSongs = new Set();
+  render();
 }
 
 async function changePowerPointBackgrounds() {
@@ -1179,6 +1509,9 @@ async function saveSettings(saveGlobalPreviousAction = true) {
     background_selected: selected,
     background_transforms: transforms,
   };
+  if (lastSpotifyPlaylistLink) {
+    payload.last_spotify_playlist = lastSpotifyPlaylistLink;
+  }
   if (saveGlobalPreviousAction) {
     payload.previous_powerpoints_action = $('previousPowerpointsAction').value;
   }
@@ -1324,6 +1657,10 @@ async function loadBackgrounds() {
     const st = await api('/api/settings');
     if (st.ok) $('outFolder').value = st.output_folder;
     if (st.ok && st.storage_mode) $('storageMode').value = st.storage_mode;
+    if (st.ok && st.last_spotify_playlist) {
+      lastSpotifyPlaylistLink = st.last_spotify_playlist;
+    }
+    updateLastSpotifyButton();
     if (st.ok && st.previous_powerpoints_action) {
       $('previousPowerpointsAction').value = st.previous_powerpoints_action;
     }
@@ -1341,6 +1678,15 @@ async function loadBackgrounds() {
 })();
 
 document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && $('completionOv').classList.contains('show')) {
+    closeCompletionPopup();
+    return;
+  }
+  if (e.key === 'Tab' && $('completionOv').classList.contains('show')) {
+    e.preventDefault();
+    $('completionCloseBtn').focus();
+    return;
+  }
   if (e.key === 'Escape') { closeModal(); closeAdjust(); }
 });
 </script>

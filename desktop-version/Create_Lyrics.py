@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import json
 import tempfile
+import time
 
 from pptx import Presentation
 from pptx.util import Inches, Pt, Cm
@@ -111,6 +112,10 @@ STORAGE_MODES = {
     STORAGE_ALL_SONGS_ALIAS,
 }
 DEFAULT_STORAGE_MODE = STORAGE_ALL_SONGS_ALIAS
+# Finder can miss the placement of several aliases created in the same instant,
+# leaving their icons stacked in the destination folder. Keep this short so a
+# queued batch remains quick while Finder records each new alias separately.
+FINDER_ALIAS_SETTLE_SECS = 0.4
 PREVIOUS_POWERPOINTS_KEEP = 'keep'
 PREVIOUS_POWERPOINTS_DELETE = 'delete'
 PREVIOUS_POWERPOINTS_MOVE = 'move_to_all_songs'
@@ -148,6 +153,25 @@ def save_app_settings(settings: dict) -> None:
 def _resolved_path(path: str) -> str:
     """Normalized absolute path for comparing user-selected folders."""
     return str(Path(os.path.expanduser(path or '')).resolve(strict=False))
+
+
+def _entry_path(path: str) -> str:
+    """Normalized absolute path without following a Finder alias/symlink."""
+    absolute = os.path.abspath(os.path.expanduser(path or ''))
+    # Resolve system-level parent aliases (notably macOS /var -> /private/var)
+    # while leaving the final song entry untouched if it is itself a symlink.
+    parent = os.path.realpath(os.path.dirname(absolute))
+    return os.path.normcase(os.path.join(parent, os.path.basename(absolute)))
+
+
+def _path_entry_is_inside(path: str, folder: str) -> bool:
+    """Containment check that does not follow the final song or folder entry."""
+    child = os.path.normcase(os.path.abspath(os.path.expanduser(path or '')))
+    parent = os.path.normcase(os.path.abspath(os.path.expanduser(folder or '')))
+    try:
+        return os.path.commonpath((child, parent)) == parent
+    except ValueError:
+        return False
 
 
 def clean_storage_mode(mode: str | None) -> str:
@@ -227,13 +251,20 @@ def _alias_to_output(library_path: str, output_base: str,
         link_path, library_path, replace=replace_path is not None)
 
 
+def _settle_finder_after_alias(output_base: str) -> None:
+    """Give Finder a moment to place a newly created output-folder alias."""
+    if not _path_is_inside(output_base, ALL_SONGS_DIR):
+        time.sleep(FINDER_ALIAS_SETTLE_SECS)
+
+
 def _invalidate_all_songs_index() -> None:
     global _ALL_SONGS_INDEX
     _ALL_SONGS_INDEX = None
 
 
 def prepare_selected_output_folder(output_base: str,
-                                   previous_action: str | None = None) -> int:
+                                   previous_action: str | None = None,
+                                   preserve_paths: list[str] | None = None) -> int:
     """Handle previous-session PowerPoints in the selected output folder.
 
     Keep leaves them alone. Delete removes real files and symlink aliases. Move
@@ -256,9 +287,12 @@ def prepare_selected_output_folder(output_base: str,
     if action == PREVIOUS_POWERPOINTS_MOVE:
         os.makedirs(ALL_SONGS_DIR, exist_ok=True)
 
+    preserved = {_entry_path(path) for path in (preserve_paths or []) if path}
     changed = 0
     for entry in os.scandir(output_dir):
         if not _is_powerpoint_file(entry.name):
+            continue
+        if _entry_path(entry.path) in preserved:
             continue
         if entry.is_symlink():
             os.remove(entry.path)
@@ -288,6 +322,51 @@ def _song_lookup_key(value: str) -> str:
     return re.sub(r'[^a-z0-9]+', ' ', text.lower()).strip()
 
 
+def _artist_credit_keys(value: str) -> set[str]:
+    """Normalized individual credits from a possibly multi-artist label.
+
+    Keep the complete label as a key as well as common credit-list pieces. This
+    makes, for example, ``Artist A`` match ``Artist A & Artist B`` without
+    losing the ability to distinguish two unrelated covers of the same song.
+    """
+    value = (value or '').strip()
+    if not value:
+        return set()
+
+    keys = {_song_lookup_key(value)}
+    parts = re.split(
+        r'\s*(?:,|;|&|\+|/|\b(?:and|with|x)\b|'
+        r'\b(?:feat(?:uring)?|ft)\.?\b)\s*',
+        value,
+        flags=re.IGNORECASE,
+    )
+    keys.update(_song_lookup_key(part) for part in parts if part.strip())
+    return {key for key in keys if key}
+
+
+def _artist_match_strength(requested_artist: str, saved_artist: str) -> int:
+    """Rank an artist match: exact label, same credits, or contained credit."""
+    requested_key = _song_lookup_key(requested_artist)
+    saved_key = _song_lookup_key(saved_artist)
+    if not requested_key or not saved_key:
+        return 0
+    if requested_key == saved_key:
+        return 3
+
+    requested_credits = _artist_credit_keys(requested_artist)
+    saved_credits = _artist_credit_keys(saved_artist)
+    # Ignore the complete multi-artist labels when comparing component sets.
+    requested_parts = requested_credits - {requested_key}
+    saved_parts = saved_credits - {saved_key}
+    requested_parts = requested_parts or {requested_key}
+    saved_parts = saved_parts or {saved_key}
+    if requested_parts == saved_parts:
+        return 2
+    if requested_parts <= saved_parts or saved_parts <= requested_parts:
+        return 1
+    return 0
+
+
 def _build_all_songs_index() -> dict[str, list[str]]:
     """Index library decks by filename title without opening every file."""
     index: dict[str, list[str]] = {}
@@ -300,6 +379,26 @@ def _build_all_songs_index() -> dict[str, list[str]]:
         if not entry.is_file():
             continue
         if not entry.name.lower().endswith(REUSABLE_SONG_EXTS):
+            continue
+        key = _song_lookup_key(entry.name)
+        if key:
+            index.setdefault(key, []).append(entry.path)
+
+    for paths in index.values():
+        paths.sort(key=lambda p: os.path.basename(p).lower())
+    return index
+
+
+def _build_output_folder_index(output_base: str) -> dict[str, list[str]]:
+    """Index reusable decks already present in the chosen output folder."""
+    index: dict[str, list[str]] = {}
+    try:
+        entries = list(os.scandir(output_base))
+    except (FileNotFoundError, NotADirectoryError, OSError):
+        return index
+
+    for entry in entries:
+        if not entry.is_file() or not entry.name.lower().endswith(REUSABLE_SONG_EXTS):
             continue
         key = _song_lookup_key(entry.name)
         if key:
@@ -395,6 +494,48 @@ def _library_candidates(title: str, url: str) -> list[dict]:
     return candidates
 
 
+def _output_folder_candidates(title: str, url: str, output_base: str,
+                              index: dict[str, list[str]] | None = None) -> list[dict]:
+    """Return matching decks already present in the chosen output folder."""
+    requested_title = (title or _title_from_url(url)).strip()
+    title_key = _song_lookup_key(requested_title)
+    if not title_key:
+        return []
+
+    folder_index = index if index is not None else _build_output_folder_index(output_base)
+    candidates = []
+    for src in folder_index.get(title_key, []):
+        if not os.path.isfile(src):
+            continue
+        found_title, found_artist = _presentation_meta(
+            src, requested_title or Path(src).stem, '')
+        candidates.append({
+            'path': src,
+            'file': os.path.basename(src),
+            'title': found_title,
+            'artist': found_artist,
+            'artist_key': _song_lookup_key(found_artist),
+        })
+    return candidates
+
+
+def existing_output_paths_for_songs(output_base: str,
+                                    songs: list[dict] | None) -> list[str]:
+    """Find chosen-folder decks that may satisfy songs in the current batch."""
+    index = _build_output_folder_index(output_base)
+    protected: set[str] = set()
+    for song in songs or []:
+        if not isinstance(song, dict):
+            continue
+        requested_title = (
+            (song.get('title') or '') or _title_from_url(song.get('url') or '')
+        ).strip()
+        key = _song_lookup_key(requested_title)
+        if key:
+            protected.update(index.get(key, []))
+    return sorted(protected, key=lambda path: os.path.basename(path).lower())
+
+
 def _public_choice(candidate: dict) -> dict:
     return {
         'path': candidate['path'],
@@ -404,9 +545,71 @@ def _public_choice(candidate: dict) -> dict:
     }
 
 
+def _select_existing_candidate(artist: str, candidates: list[dict]) -> dict:
+    """Select one saved artist version or describe the required user choice."""
+    if not candidates:
+        return {'status': 'none'}
+
+    requested_artist_key = _song_lookup_key(artist)
+    match_strengths = [
+        _artist_match_strength(artist, candidate.get('artist', ''))
+        for candidate in candidates
+    ]
+    best_strength = max(match_strengths, default=0)
+    best_matches = [
+        candidate for candidate, strength in zip(candidates, match_strengths)
+        if best_strength and strength == best_strength
+    ]
+
+    if len(best_matches) == 1:
+        return {'status': 'selected', 'candidate': best_matches[0]}
+    if not requested_artist_key and len(candidates) == 1:
+        return {'status': 'selected', 'candidate': candidates[0]}
+    return {
+        'status': 'ambiguous',
+        'choices': [_public_choice(candidate) for candidate in candidates],
+    }
+
+
+def _existing_output_result(candidate: dict) -> dict:
+    """Public result for a deck that is already in the chosen output folder."""
+    return {
+        'path': candidate['path'],
+        'file': candidate['file'],
+        'title': candidate['title'],
+        'artist': candidate['artist'],
+        'source': 'Chosen output folder',
+        'delivery': 'already_present',
+    }
+
+
+def resolve_existing_song_from_output(artist: str, title: str, url: str,
+                                      output_base: str) -> dict:
+    """Use a matching deck in the chosen output folder before any cleanup."""
+    selected = _select_existing_candidate(
+        artist, _output_folder_candidates(title, url, output_base))
+    if selected.get('status') == 'selected':
+        return {
+            'status': 'placed',
+            'result': _existing_output_result(selected['candidate']),
+        }
+    return selected
+
+
 def place_existing_song_in_output(src: str, output_base: str,
                                   storage_mode: str | None = None) -> dict:
-    """Place one All Songs deck into the selected output folder."""
+    """Use an output-folder deck, or place one All Songs deck there."""
+    if _path_entry_is_inside(src, output_base):
+        if not os.path.isfile(src):
+            raise FileNotFoundError(src)
+        title, artist = _presentation_meta(src, Path(src).stem, '')
+        return _existing_output_result({
+            'path': src,
+            'file': os.path.basename(src),
+            'title': title,
+            'artist': artist,
+        })
+
     if not _path_is_inside(src, ALL_SONGS_DIR):
         raise ValueError('That file is not inside the All Songs directory.')
     if not os.path.isfile(src):
@@ -417,6 +620,7 @@ def place_existing_song_in_output(src: str, output_base: str,
     delivery = 'linked'
     if mode == STORAGE_ALL_SONGS_ALIAS:
         dest = _alias_to_output(src, output_base)
+        _settle_finder_after_alias(output_base)
     else:
         dest = os.path.join(output_base, os.path.basename(src))
         if _resolved_path(src) != _resolved_path(dest):
@@ -445,50 +649,14 @@ def resolve_existing_song_from_all_songs(artist: str, title: str, url: str,
     multiple artist versions, the caller should let the user choose one or fetch
     a new version.
     """
-    candidates = _library_candidates(title, url)
-    if not candidates:
-        return {'status': 'none'}
-
-    requested_artist_key = _song_lookup_key(artist)
-    distinct_artist_keys = {
-        c['artist_key'] for c in candidates if c.get('artist_key')
-    }
-    exact_matches = [
-        c for c in candidates
-        if requested_artist_key and c.get('artist_key') == requested_artist_key
-    ]
-
-    if len(exact_matches) == 1:
+    selected = _select_existing_candidate(artist, _library_candidates(title, url))
+    if selected.get('status') == 'selected':
         return {
             'status': 'placed',
             'result': place_existing_song_in_output(
-                exact_matches[0]['path'], output_base, storage_mode),
+                selected['candidate']['path'], output_base, storage_mode),
         }
-
-    if len(candidates) > 1 or len(distinct_artist_keys) > 1:
-        return {
-            'status': 'ambiguous',
-            'choices': [_public_choice(c) for c in candidates],
-        }
-
-    if exact_matches:
-        return {
-            'status': 'placed',
-            'result': place_existing_song_in_output(
-                exact_matches[0]['path'], output_base, storage_mode),
-        }
-
-    if not requested_artist_key and len(candidates) == 1:
-        return {
-            'status': 'placed',
-            'result': place_existing_song_in_output(
-                candidates[0]['path'], output_base, storage_mode),
-        }
-
-    return {
-        'status': 'ambiguous',
-        'choices': [_public_choice(c) for c in candidates],
-    }
+    return selected
 
 
 def _library_destination_for_song(title: str, artist: str = '') -> str:
@@ -497,9 +665,18 @@ def _library_destination_for_song(title: str, artist: str = '') -> str:
     artist_key = _song_lookup_key(artist)
     candidates = _library_candidates(title, '')
 
-    for candidate in candidates:
-        if artist_key and candidate.get('artist_key') == artist_key:
-            return candidate['path']
+    match_strengths = [
+        _artist_match_strength(artist, candidate.get('artist', ''))
+        if artist_key else 0
+        for candidate in candidates
+    ]
+    best_strength = max(match_strengths, default=0)
+    matching = [
+        candidate for candidate, strength in zip(candidates, match_strengths)
+        if best_strength and strength == best_strength
+    ]
+    if len(matching) == 1:
+        return matching[0]['path']
 
     preferred_name = f'{safe_filename(title)}.pptx'
     dest = os.path.join(ALL_SONGS_DIR, preferred_name)
@@ -1587,7 +1764,15 @@ def gather_songs_gui() -> tuple[list[dict], str, list[dict]] | None:
         output_base = output_dir_var.get().strip() or CUR_DIR
         try:
             os.makedirs(output_base, exist_ok=True)
-            prepare_selected_output_folder(output_base)
+            batch_requests = [
+                {'artist': artist, 'title': title,
+                 'url': azlyrics_url or genius_url}
+                for artist, title, azlyrics_url, genius_url in entries
+            ]
+            protected_paths = existing_output_paths_for_songs(
+                output_base, batch_requests)
+            prepare_selected_output_folder(
+                output_base, preserve_paths=protected_paths)
         except OSError as exc:
             messagebox.showerror(
                 "Can't use output folder",
@@ -1598,10 +1783,15 @@ def gather_songs_gui() -> tuple[list[dict], str, list[dict]] | None:
         songs.clear()
         not_found = []
         for i, (artist, title, azlyrics_url, genius_url) in enumerate(entries, 1):
-            status_var.set(f"Checking library {i} of {len(entries)}...")
+            status_var.set(f"Checking chosen folder {i} of {len(entries)}...")
             root.update_idletasks()
-            existing = resolve_existing_song_from_all_songs(
+            existing = resolve_existing_song_from_output(
                 artist, title, azlyrics_url or genius_url, output_base)
+            if existing.get('status') == 'none':
+                status_var.set(f"Checking All Songs {i} of {len(entries)}...")
+                root.update_idletasks()
+                existing = resolve_existing_song_from_all_songs(
+                    artist, title, azlyrics_url or genius_url, output_base)
             if existing.get('status') == 'placed':
                 placed = existing['result']
                 songs.append({
@@ -2094,7 +2284,9 @@ def build_song_presentation(song: dict, output_base: str,
         _invalidate_all_songs_index()
 
     if mode == STORAGE_ALL_SONGS_ALIAS:
-        return _alias_to_output(final_pptx_path, output_base)
+        output_path = _alias_to_output(final_pptx_path, output_base)
+        _settle_finder_after_alias(output_base)
+        return output_path
     return final_pptx_path
 
 

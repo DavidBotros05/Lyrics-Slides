@@ -262,6 +262,10 @@ class Handler(BaseHTTPRequestHandler):
                 'ok': True,
                 'output_folder': settings.get('output_folder', CUR_DIR) or CUR_DIR,
                 'storage_mode': core.clean_storage_mode(settings.get('storage_mode')),
+                'last_spotify_playlist': (
+                    settings.get('last_spotify_playlist', '')
+                    if isinstance(settings.get('last_spotify_playlist'), str)
+                    else ''),
                 'previous_powerpoints_action': (
                     core.clean_previous_powerpoints_action(
                         settings.get('previous_powerpoints_action'))),
@@ -365,6 +369,9 @@ class Handler(BaseHTTPRequestHandler):
                              'error': core.LAST_ERROR or
                                       "Couldn't read that Spotify playlist."})
             return
+        settings = core.load_app_settings()
+        settings['last_spotify_playlist'] = link[:2048]
+        core.save_app_settings(settings)
         self._send_json({
             'ok': True,
             'name': result['name'],
@@ -543,13 +550,63 @@ class Handler(BaseHTTPRequestHandler):
             data.get('previous_powerpoints_action'))
         try:
             os.makedirs(output_folder, exist_ok=True)
-            core.prepare_selected_output_folder(output_folder, previous_action)
         except OSError as exc:
             self._send_json({'ok': False,
                              'error': f"Can't use that output folder ({exc})."})
             return
 
         library_path = (data.get('library_path') or '').strip()
+        protected_paths = core.existing_output_paths_for_songs(
+            output_folder,
+            data.get('preserve_songs') if isinstance(data.get('preserve_songs'), list)
+            else [],
+        )
+        if library_path:
+            protected_paths.append(library_path)
+        elif not data.get('skip_output'):
+            existing = core.resolve_existing_song_from_output(
+                artist=(data.get('artist') or '').strip(),
+                title=(data.get('title') or '').strip(),
+                url=(data.get('url') or '').strip(),
+                output_base=output_folder)
+            if existing.get('status') == 'ambiguous':
+                self._send_json({
+                    'ok': False,
+                    'needs_choice': True,
+                    'choice_source': 'output',
+                    'choices': existing.get('choices', []),
+                    'error': 'Multiple versions already exist in the chosen folder.',
+                })
+                return
+            if existing.get('status') == 'placed':
+                result = existing['result']
+                protected_paths.append(result['path'])
+                try:
+                    core.prepare_selected_output_folder(
+                        output_folder, previous_action, protected_paths)
+                except OSError as exc:
+                    self._send_json({'ok': False,
+                                     'error': f"Can't use that output folder ({exc})."})
+                    return
+                self._send_json({
+                    'ok': True,
+                    'path': result['path'],
+                    'file': result['file'],
+                    'title': result['title'],
+                    'artist': result['artist'],
+                    'source': result['source'],
+                    'delivery': result.get('delivery', ''),
+                })
+                return
+
+        try:
+            core.prepare_selected_output_folder(
+                output_folder, previous_action, protected_paths)
+        except OSError as exc:
+            self._send_json({'ok': False,
+                             'error': f"Can't use that output folder ({exc})."})
+            return
+
         if library_path:
             try:
                 existing = core.place_existing_song_in_output(
@@ -606,6 +663,7 @@ class Handler(BaseHTTPRequestHandler):
                     self._send_json({
                         'ok': False,
                         'needs_choice': True,
+                        'choice_source': 'all_songs',
                         'choices': existing.get('choices', []),
                         'error': 'Multiple saved versions match this song.',
                     })
@@ -665,6 +723,10 @@ class Handler(BaseHTTPRequestHandler):
             settings['output_folder'] = data['output_folder'].strip()
         if isinstance(data.get('storage_mode'), str):
             settings['storage_mode'] = core.clean_storage_mode(data.get('storage_mode'))
+        if (isinstance(data.get('last_spotify_playlist'), str) and
+                data['last_spotify_playlist'].strip()):
+            settings['last_spotify_playlist'] = (
+                data['last_spotify_playlist'].strip()[:2048])
         if isinstance(data.get('previous_powerpoints_action'), str):
             settings['previous_powerpoints_action'] = (
                 core.clean_previous_powerpoints_action(
