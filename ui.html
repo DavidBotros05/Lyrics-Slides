@@ -122,11 +122,14 @@
         display: flex; align-items: center; gap: 10px; }
   .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--border); }
 
-  .bg-strip { display: flex; gap: 8px; overflow-x: auto; padding: 4px 2px 10px;
+  .bg-picker { position: relative; min-width: 0; }
+  .bg-strip { display: flex; gap: 8px; overflow-x: auto; padding: 4px 36px 10px;
+    scroll-padding-inline: 36px; scroll-snap-type: x proximity;
     scrollbar-width: thin; scrollbar-color: var(--border-strong) transparent; }
   .bg-opt {
     flex: 0 0 auto; width: 96px; cursor: pointer; border: 1px solid var(--border);
     border-radius: 10px; padding: 5px; text-align: center; background: var(--panel2);
+    scroll-snap-align: start;
     transition: border-color .15s var(--ease), transform .15s var(--ease),
                 box-shadow .15s var(--ease);
   }
@@ -141,6 +144,9 @@
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
   .row-btns { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; align-items: center; }
+  .add-song { width: 100%; margin: 0 0 14px; padding: 11px 16px;
+    border-style: dashed; background: transparent; color: var(--muted); }
+  .add-song:hover:not(:disabled) { color: var(--text); background: var(--panel2); }
   button {
     background: var(--panel2); color: var(--text); border: 1px solid var(--border);
     border-radius: 9px; padding: 8px 16px; font-size: 14px; font-weight: 500;
@@ -158,6 +164,17 @@
   button.danger:hover:not(:disabled) { border-color: rgba(255, 120, 120, .5);
     color: var(--bad); background: var(--bad-soft); }
   button:disabled { opacity: .45; cursor: default; }
+  .bg-scroll-btn { position: absolute; top: calc(50% - 6px); z-index: 2;
+    width: 28px; height: 38px; min-height: 0; padding: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-color: var(--border-strong); border-radius: 8px;
+    background: var(--panel); color: var(--text); font-size: 22px; line-height: 1;
+    transform: translateY(-50%); }
+  .bg-scroll-btn.prev { left: 4px; }
+  .bg-scroll-btn.next { right: 4px; }
+  .bg-scroll-btn:hover:not(:disabled) { background: var(--panel3); }
+  .bg-scroll-btn:active:not(:disabled) { transform: translateY(-50%) scale(.96); }
+  .bg-scroll-btn:disabled { opacity: .24; }
   .lyr-badge { font-size: 12.5px; font-weight: 500; color: var(--good); }
   a.dlbtn {
     display: inline-block; background: var(--good); color: #06241a;
@@ -297,7 +314,7 @@
     .song-head { align-items: flex-start; flex-direction: column; gap: 6px; }
     .song-status { text-align: left; max-width: 100%; }
     .grid2 { gap: 12px; }
-    .bg-strip { margin-inline: -2px; padding: 4px 2px 12px; }
+    .bg-strip { margin-inline: -2px; padding: 4px 36px 12px; }
     .bg-opt { width: 108px; }
     .bg-opt img, .bg-opt .rand { height: 58px; }
 
@@ -401,6 +418,7 @@
   </div>
 
   <div id="songs"></div>
+  <button type="button" class="add-song" id="addSongBtn" onclick="addSong()">+ Add another song</button>
 
   <div class="card">
     <details id="mgrDetails">
@@ -459,7 +477,14 @@
     <div class="card">
       <h2>New background</h2>
       <label class="fld">Background to apply</label>
-      <div class="bg-strip" id="changeBgStrip"></div>
+      <div class="bg-picker">
+        <button type="button" class="bg-scroll-btn prev" id="changeBgStrip-prev"
+                aria-label="Previous backgrounds" onclick="scrollBackgrounds('changeBgStrip', -1)">&#8249;</button>
+        <div class="bg-strip" id="changeBgStrip"
+             onscroll="updateBackgroundArrows('changeBgStrip')"></div>
+        <button type="button" class="bg-scroll-btn next" id="changeBgStrip-next"
+                aria-label="Next backgrounds" onclick="scrollBackgrounds('changeBgStrip', 1)">&#8250;</button>
+      </div>
       <div class="hint">Random uses the toggled-on images from the background manager below.</div>
     </div>
 
@@ -583,6 +608,7 @@ function setTab(tab) {
   $('changeBgTab').classList.toggle('active', isChange);
   $('createTabBtn').classList.toggle('active', !isChange);
   $('changeBgTabBtn').classList.toggle('active', isChange);
+  requestAnimationFrame(updateAllBackgroundArrows);
 }
 
 function newSong() {
@@ -598,6 +624,21 @@ function setSongCount(n) {
   render();
 }
 
+function addSong() {
+  if (songs.length >= 200) {
+    toast('You can add up to 200 songs.');
+    return;
+  }
+  songs.push(newSong());
+  $('songCount').value = songs.length;
+  render();
+  requestAnimationFrame(() => {
+    const lastSong = $('songs').lastElementChild;
+    const artistInput = lastSong && lastSong.querySelector('input[type="text"]');
+    if (artistInput) artistInput.focus();
+  });
+}
+
 function removeSong(i) {
   songs.splice(i, 1);
   if (!songs.length) songs.push(newSong());
@@ -610,36 +651,74 @@ function esc(s) {
                   .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-function jsq(s) { return JSON.stringify(s || ''); }
+function jsq(s) { return esc(JSON.stringify(s || '')); }
 
 function bgStrip(i) {
   const s = songs[i];
-  let h = `<div class="bg-opt ${s.bg==='random'?'sel':''}" onclick="pickBg(${i},'random')">
+  let h = `<div class="bg-opt ${s.bg==='random'?'sel':''}" data-bg="random" onclick="pickBg(${i},'random')">
              <div class="rand">&#127922;</div><div class="nm">Random</div></div>`;
   for (const b of backgrounds) {
-    h += `<div class="bg-opt ${s.bg===b.name?'sel':''}" onclick="pickBg(${i},${jsq(b.name)})">
+    h += `<div class="bg-opt ${s.bg===b.name?'sel':''}" data-bg="${esc(b.name)}" onclick="pickBg(${i},${jsq(b.name)})">
             <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
             <div class="nm" title="${esc(b.name)}">${esc(b.name)}</div></div>`;
   }
   return h;
 }
 
-function pickBg(i, name) { songs[i].bg = name; render(); }
+function updateBackgroundSelection(stripId, name) {
+  const strip = $(stripId);
+  if (!strip) return;
+  for (const option of strip.querySelectorAll('.bg-opt')) {
+    option.classList.toggle('sel', option.dataset.bg === name);
+  }
+}
+
+function pickBg(i, name) {
+  songs[i].bg = name;
+  updateBackgroundSelection(`songBgStrip-${i}`, name);
+}
+
+function updateBackgroundArrows(stripId) {
+  const strip = $(stripId);
+  const prev = $(`${stripId}-prev`);
+  const next = $(`${stripId}-next`);
+  if (!strip || !prev || !next) return;
+  const maxScroll = Math.max(0, strip.scrollWidth - strip.clientWidth);
+  prev.disabled = maxScroll <= 1 || strip.scrollLeft <= 1;
+  next.disabled = maxScroll <= 1 || strip.scrollLeft >= maxScroll - 1;
+}
+
+function updateAllBackgroundArrows() {
+  for (let i = 0; i < songs.length; i++) updateBackgroundArrows(`songBgStrip-${i}`);
+  updateBackgroundArrows('changeBgStrip');
+}
+
+function scrollBackgrounds(stripId, direction) {
+  const strip = $(stripId);
+  if (!strip) return;
+  const distance = Math.max(180, Math.floor(strip.clientWidth * .72));
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  strip.scrollBy({left: direction * distance, behavior: reducedMotion ? 'auto' : 'smooth'});
+}
 
 function renderChangeBgStrip() {
   const host = $('changeBgStrip');
   if (!host) return;
-  let h = `<div class="bg-opt ${changeBg==='random'?'sel':''}" onclick="pickChangeBg('random')">
+  let h = `<div class="bg-opt ${changeBg==='random'?'sel':''}" data-bg="random" onclick="pickChangeBg('random')">
              <div class="rand">&#127922;</div><div class="nm">Random</div></div>`;
   for (const b of backgrounds) {
-    h += `<div class="bg-opt ${changeBg===b.name?'sel':''}" onclick="pickChangeBg(${jsq(b.name)})">
+    h += `<div class="bg-opt ${changeBg===b.name?'sel':''}" data-bg="${esc(b.name)}" onclick="pickChangeBg(${jsq(b.name)})">
             <img src="/backgrounds/${encodeURIComponent(b.name)}" loading="lazy">
             <div class="nm" title="${esc(b.name)}">${esc(b.name)}</div></div>`;
   }
   host.innerHTML = h;
+  requestAnimationFrame(() => updateBackgroundArrows('changeBgStrip'));
 }
 
-function pickChangeBg(name) { changeBg = name; renderChangeBgStrip(); }
+function pickChangeBg(name) {
+  changeBg = name;
+  updateBackgroundSelection('changeBgStrip', name);
+}
 
 function pptxFiles(files) {
   return Array.from(files || []).filter(f => f.name && f.name.toLowerCase().endsWith('.pptx'));
@@ -730,7 +809,16 @@ function render() {
         </div>
         <div class="full">
           <label class="fld">Background for this song</label>
-          <div class="bg-strip">${bgStrip(i)}</div>
+          <div class="bg-picker">
+            <button type="button" class="bg-scroll-btn prev" id="songBgStrip-${i}-prev"
+                    aria-label="Previous backgrounds for song ${i + 1}"
+                    onclick="scrollBackgrounds('songBgStrip-${i}', -1)">&#8249;</button>
+            <div class="bg-strip" id="songBgStrip-${i}"
+                 onscroll="updateBackgroundArrows('songBgStrip-${i}')">${bgStrip(i)}</div>
+            <button type="button" class="bg-scroll-btn next" id="songBgStrip-${i}-next"
+                    aria-label="Next backgrounds for song ${i + 1}"
+                    onclick="scrollBackgrounds('songBgStrip-${i}', 1)">&#8250;</button>
+          </div>
         </div>
       </div>
       <div class="row-btns">
@@ -743,6 +831,8 @@ function render() {
         ${songs.length > 1 ? `<button class="danger" style="margin-left:auto" onclick="removeSong(${i})">Remove</button>` : ''}
       </div>
     </div>`).join('');
+  $('addSongBtn').disabled = songs.length >= 200;
+  requestAnimationFrame(updateAllBackgroundArrows);
   updateDlAllBar();
 }
 
@@ -1279,6 +1369,7 @@ async function saveAdjust() {
     stage.addEventListener(ev, () => { adjDrag = null; });
   window.addEventListener('resize', () => {
     if (adjIdx >= 0 && $('adjOv').classList.contains('show')) layoutAdjust();
+    updateAllBackgroundArrows();
   });
 })();
 
