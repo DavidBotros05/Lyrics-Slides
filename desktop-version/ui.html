@@ -38,6 +38,10 @@
   }
   ::selection { background: var(--accent-soft); }
   .wrap { max-width: 860px; margin: 0 auto; padding: 32px 20px 88px; }
+  .page-jump { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+  .page-jump.bottom { margin: 24px 0 0; }
+  .page-jump button { color: var(--muted); background: transparent; }
+  .page-jump button:hover:not(:disabled) { color: var(--text); }
 
   header { display: flex; align-items: center; justify-content: space-between;
     gap: 16px; margin-bottom: 26px; padding-bottom: 20px;
@@ -422,6 +426,9 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="page-jump">
+    <button type="button" onclick="scrollPage('bottom')" aria-label="Scroll to the bottom of the page">&#8595; Jump to bottom</button>
+  </div>
   <header>
     <div class="brand">
       <div class="mark">&#127925;</div>
@@ -454,15 +461,16 @@
   </div>
 
   <div class="card">
-    <h2>Import from a Spotify playlist</h2>
+    <h2>Import a playlist</h2>
     <div class="inline-row">
-      <input type="text" id="spotifyLink" placeholder="https://open.spotify.com/playlist/..."
-             style="flex:1" onkeydown="if(event.key==='Enter')importSpotify()">
-      <button onclick="importSpotify()" id="spotifyBtn">Import songs</button>
-      <button onclick="importLastSpotify()" id="lastSpotifyBtn" disabled>Import last playlist</button>
+      <input type="text" id="playlistLink" placeholder="Paste a Spotify or Apple Music playlist link"
+             aria-label="Spotify or Apple Music playlist link"
+             style="flex:1" onkeydown="if(event.key==='Enter')importPlaylist()">
+      <button onclick="importPlaylist()" id="playlistBtn">Import songs</button>
+      <button onclick="importLastPlaylist()" id="lastPlaylistBtn" disabled>Import last playlist</button>
     </div>
-    <div class="hint" id="spotifyStatus">Paste a public playlist (or album) link - every song and its
-      artist is added as a row below. No Spotify login needed. Lyrics are then looked up per song as usual.</div>
+    <div class="hint" id="playlistStatus">Spotify and Apple Music links are detected automatically.
+      Songs and artists are added below, ready for lyric lookup.</div>
   </div>
 
   <div id="songs"></div>
@@ -496,13 +504,14 @@
     </div>
     <div class="field">
       <label class="fld">Previous-session PowerPoints in this folder</label>
-      <select id="previousPowerpointsAction" onchange="saveSettings()">
+      <select id="previousPowerpointsAction" onchange="syncPreviousActionButton(); saveSettings()">
         <option value="keep">Keep them</option>
         <option value="delete">Delete them</option>
-        <option value="move_to_all_songs">Move them to All Songs</option>
+        <option value="move_to_all_songs">Move them all to All Songs</option>
       </select>
       <div class="row-btns">
-        <button onclick="savePreviousActionForFolder()">Save for this folder</button>
+        <button onclick="savePreviousActionForFolder()">Remember for this folder</button>
+        <button id="applyPreviousActionBtn" onclick="applyPreviousActionNow()">Apply now</button>
         <span class="hint" id="previousFolderStatus"></span>
       </div>
     </div>
@@ -587,6 +596,9 @@
       <span id="changeBgStatus" class="hint"></span>
     </div>
   </section>
+  <div class="page-jump bottom">
+    <button type="button" onclick="scrollPage('top')" aria-label="Scroll to the top of the page">&#8593; Jump to top</button>
+  </div>
 </div>
 
 <!-- lyrics preview / edit modal -->
@@ -664,7 +676,7 @@ let changeBg = 'random';
 let changeSources = [{path:'', includeSubfolders:true}];
 let modalIdx = -1;
 let previousPowerpointsByFolder = {};
-let lastSpotifyPlaylistLink = '';
+let lastPlaylistLink = '';
 let creationQueue = [];
 let activeQueueSong = null;
 let queueRunning = false;
@@ -681,6 +693,14 @@ const $ = id => document.getElementById(id);
 function toast(msg) {
   const t = $('toast'); t.textContent = msg; t.style.display = 'block';
   clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3200);
+}
+
+function scrollPage(edge) {
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  window.scrollTo({
+    top: edge === 'bottom' ? document.documentElement.scrollHeight : 0,
+    behavior: reducedMotion ? 'auto' : 'smooth',
+  });
 }
 
 function closeCompletionPopup() {
@@ -921,6 +941,17 @@ function applyPreviousActionForFolder() {
   } else if (status) {
     status.textContent = '';
   }
+  syncPreviousActionButton();
+}
+
+function syncPreviousActionButton() {
+  const button = $('applyPreviousActionBtn');
+  if (!button) return;
+  const action = $('previousPowerpointsAction').value;
+  button.disabled = action === 'keep';
+  button.textContent = action === 'move_to_all_songs'
+      ? 'Move them now'
+      : action === 'delete' ? 'Delete them now' : 'Apply now';
 }
 
 async function savePreviousActionForFolder() {
@@ -930,6 +961,49 @@ async function savePreviousActionForFolder() {
   await saveSettings(false);
   $('previousFolderStatus').textContent = 'Saved for this folder.';
   toast('Previous-session setting saved for this folder.');
+}
+
+async function applyPreviousActionNow() {
+  const folder = outputFolderKey();
+  if (!folder) { toast('Choose an output folder first.'); return; }
+  if (queueRunning) {
+    toast('Wait for the creation queue to finish first.');
+    return;
+  }
+
+  const action = $('previousPowerpointsAction').value;
+  if (action === 'keep') return;
+  const verb = action === 'move_to_all_songs'
+      ? 'move every PowerPoint in this folder to All Songs'
+      : 'permanently delete every PowerPoint in this folder';
+  if (!window.confirm(`Are you sure you want to ${verb}?`)) return;
+
+  const button = $('applyPreviousActionBtn');
+  button.disabled = true;
+  $('previousFolderStatus').textContent = action === 'move_to_all_songs'
+      ? 'Moving PowerPoints…' : 'Deleting PowerPoints…';
+  try {
+    const result = await api('/api/prepare_output_folder', {
+      output_folder: folder,
+      previous_powerpoints_action: action,
+    });
+    if (!result.ok) {
+      $('previousFolderStatus').textContent = result.error || 'Action failed.';
+      toast(result.error || 'Action failed.');
+      return;
+    }
+    const count = result.changed_count || 0;
+    const message = action === 'move_to_all_songs'
+        ? `${count} PowerPoint${count === 1 ? '' : 's'} moved to All Songs.`
+        : `${count} PowerPoint${count === 1 ? '' : 's'} deleted.`;
+    $('previousFolderStatus').textContent = message;
+    toast(message);
+  } catch (e) {
+    $('previousFolderStatus').textContent = 'Server error applying this action.';
+    toast('Server error applying this action.');
+  } finally {
+    syncPreviousActionButton();
+  }
 }
 
 function esc(s) {
@@ -1132,59 +1206,58 @@ function setStatus(i, msg, cls) { setSongStatus(songs[i], msg, cls); }
 
 function hasInput(s) { return (s.artist.trim() && s.title.trim()) || s.url.trim() || s.lyrics.trim(); }
 
-/* ---------- Spotify playlist import ---------- */
-function updateLastSpotifyButton() {
-  const btn = $('lastSpotifyBtn');
-  btn.disabled = !lastSpotifyPlaylistLink;
-  btn.title = lastSpotifyPlaylistLink
-      ? `Import again: ${lastSpotifyPlaylistLink}`
-      : 'Import a Spotify playlist once to enable this button.';
+/* ---------- Spotify / Apple Music playlist import ---------- */
+function updateLastPlaylistButton() {
+  const btn = $('lastPlaylistBtn');
+  btn.disabled = !lastPlaylistLink;
+  btn.title = lastPlaylistLink
+      ? `Import again: ${lastPlaylistLink}`
+      : 'Import a playlist once to enable this button.';
 }
 
-function setSpotifyImportBusy(busy) {
-  $('spotifyBtn').disabled = busy;
-  $('lastSpotifyBtn').disabled = busy || !lastSpotifyPlaylistLink;
+function setPlaylistImportBusy(busy) {
+  $('playlistBtn').disabled = busy;
+  $('lastPlaylistBtn').disabled = busy || !lastPlaylistLink;
 }
 
-function importLastSpotify() {
-  if (!lastSpotifyPlaylistLink) {
-    toast('Import a Spotify playlist first.');
+function importLastPlaylist() {
+  if (!lastPlaylistLink) {
+    toast('Import a Spotify or Apple Music playlist first.');
     return;
   }
-  importSpotify(lastSpotifyPlaylistLink);
+  importPlaylist(lastPlaylistLink);
 }
 
-async function importSpotify(savedLink = '') {
-  const link = (savedLink || $('spotifyLink').value).trim();
-  if (!link) { toast('Paste a Spotify playlist link first.'); return; }
+async function importPlaylist(savedLink = '') {
+  const link = (savedLink || $('playlistLink').value).trim();
+  if (!link) { toast('Paste a Spotify or Apple Music playlist link first.'); return; }
 
-  setSpotifyImportBusy(true);
-  $('spotifyStatus').innerHTML = '<span class="spin"></span>Reading the playlist&hellip;';
+  setPlaylistImportBusy(true);
+  $('playlistStatus').innerHTML = '<span class="spin"></span>Detecting service and reading playlist&hellip;';
   try {
-    const r = await api('/api/spotify_playlist', {link});
+    const r = await api('/api/playlist', {link});
     if (!r.ok) {
-      $('spotifyStatus').textContent = r.error || "Couldn't read that playlist.";
+      $('playlistStatus').textContent = r.error || "Couldn't read that playlist.";
       toast(r.error || "Couldn't read that playlist.");
     } else {
-      lastSpotifyPlaylistLink = link;
+      lastPlaylistLink = link;
       const rows = r.tracks.map(t =>
         Object.assign(newSong(), {artist: t.artist, title: t.title}));
-      // Replace the rows if nothing was typed yet; otherwise add to the end.
       if (songs.every(s => !hasInput(s))) songs = rows;
       else songs = songs.concat(rows);
       $('songCount').value = songs.length;
       let msg = `Imported ${r.tracks.length} song${r.tracks.length === 1 ? '' : 's'} from "${r.name}".`;
       if (r.note) msg += ' ' + r.note;
-      $('spotifyStatus').textContent = msg;
-      $('spotifyLink').value = '';
+      $('playlistStatus').textContent = msg;
+      $('playlistLink').value = '';
       render();
       toast(`Added ${r.tracks.length} song${r.tracks.length === 1 ? '' : 's'} from "${r.name}".`);
     }
   } catch (e) {
-    $('spotifyStatus').textContent = 'Server error reading the playlist.';
+    $('playlistStatus').textContent = 'Server error reading the playlist.';
   }
-  setSpotifyImportBusy(false);
-  updateLastSpotifyButton();
+  setPlaylistImportBusy(false);
+  updateLastPlaylistButton();
 }
 
 /* ---------- lyrics modal (manual paste first; fetch only on demand) ---------- */
@@ -1599,8 +1672,8 @@ async function saveSettings(saveGlobalPreviousAction = true) {
     background_selected: selected,
     background_transforms: transforms,
   };
-  if (lastSpotifyPlaylistLink) {
-    payload.last_spotify_playlist = lastSpotifyPlaylistLink;
+  if (lastPlaylistLink) {
+    payload.last_playlist = lastPlaylistLink;
   }
   if (saveGlobalPreviousAction) {
     payload.previous_powerpoints_action = $('previousPowerpointsAction').value;
@@ -1748,10 +1821,10 @@ async function loadBackgrounds() {
     const st = await api('/api/settings');
     if (st.ok) $('outFolder').value = st.output_folder;
     if (st.ok && st.storage_mode) $('storageMode').value = st.storage_mode;
-    if (st.ok && st.last_spotify_playlist) {
-      lastSpotifyPlaylistLink = st.last_spotify_playlist;
+    if (st.ok && st.last_playlist) {
+      lastPlaylistLink = st.last_playlist;
     }
-    updateLastSpotifyButton();
+    updateLastPlaylistButton();
     if (st.ok && st.previous_powerpoints_action) {
       $('previousPowerpointsAction').value = st.previous_powerpoints_action;
     }
@@ -1763,6 +1836,7 @@ async function loadBackgrounds() {
   } catch (e) {
     $('fileWarn').style.display = 'block';
   }
+  syncPreviousActionButton();
   syncChangeOutputMode();
   renderChangeSources();
   render();

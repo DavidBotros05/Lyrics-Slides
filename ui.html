@@ -407,14 +407,15 @@
   </div>
 
   <div class="card">
-    <h2>Import from a Spotify playlist</h2>
+    <h2>Import a playlist</h2>
     <div class="inline-row">
-      <input type="text" id="spotifyLink" placeholder="https://open.spotify.com/playlist/..."
-             style="flex:1" onkeydown="if(event.key==='Enter')importSpotify()">
-      <button onclick="importSpotify()" id="spotifyBtn">Import songs</button>
+      <input type="text" id="playlistLink" placeholder="Paste a Spotify or Apple Music playlist link"
+             aria-label="Spotify or Apple Music playlist link"
+             style="flex:1" onkeydown="if(event.key==='Enter')importPlaylist()">
+      <button onclick="importPlaylist()" id="playlistBtn">Import songs</button>
     </div>
-    <div class="hint" id="spotifyStatus">Paste a public playlist (or album) link - every song and its
-      artist is added as a row below. No Spotify login needed. Lyrics are then looked up per song as usual.</div>
+    <div class="hint" id="playlistStatus">Spotify and Apple Music links are detected automatically.
+      Songs and artists are added below, ready for lyric lookup.</div>
   </div>
 
   <div id="songs"></div>
@@ -890,17 +891,17 @@ async function downloadAll() {
 
 function hasInput(s) { return (s.artist.trim() && s.title.trim()) || s.url.trim() || s.lyrics.trim(); }
 
-/* ---------- Spotify playlist import ---------- */
-async function importSpotify() {
-  const link = $('spotifyLink').value.trim();
-  if (!link) { toast('Paste a Spotify playlist link first.'); return; }
+/* ---------- Spotify / Apple Music playlist import ---------- */
+async function importPlaylist() {
+  const link = $('playlistLink').value.trim();
+  if (!link) { toast('Paste a Spotify or Apple Music playlist link first.'); return; }
 
-  $('spotifyBtn').disabled = true;
-  $('spotifyStatus').innerHTML = '<span class="spin"></span>Reading the playlist&hellip;';
+  $('playlistBtn').disabled = true;
+  $('playlistStatus').innerHTML = '<span class="spin"></span>Detecting service and reading playlist&hellip;';
   try {
-    const r = await api('/api/spotify_playlist', {link});
+    const r = await api('/api/playlist', {link});
     if (!r.ok) {
-      $('spotifyStatus').textContent = r.error || "Couldn't read that playlist.";
+      $('playlistStatus').textContent = r.error || "Couldn't read that playlist.";
       toast(r.error || "Couldn't read that playlist.");
     } else {
       const rows = r.tracks.map(t =>
@@ -911,15 +912,15 @@ async function importSpotify() {
       $('songCount').value = songs.length;
       let msg = `Imported ${r.tracks.length} song${r.tracks.length === 1 ? '' : 's'} from "${r.name}".`;
       if (r.note) msg += ' ' + r.note;
-      $('spotifyStatus').textContent = msg;
-      $('spotifyLink').value = '';
+      $('playlistStatus').textContent = msg;
+      $('playlistLink').value = '';
       render();
-      toast(`Added ${r.tracks.length} songs from "${r.name}".`);
+      toast(`Added ${r.tracks.length} song${r.tracks.length === 1 ? '' : 's'} from "${r.name}".`);
     }
   } catch (e) {
-    $('spotifyStatus').textContent = 'Server error reading the playlist.';
+    $('playlistStatus').textContent = 'Server error reading the playlist.';
   }
-  $('spotifyBtn').disabled = false;
+  $('playlistBtn').disabled = false;
 }
 
 /* ---------- lyrics modal (manual paste first; fetch only on demand) ---------- */

@@ -176,6 +176,63 @@ class OutputFolderReuseTests(unittest.TestCase):
             fetch.assert_not_called()
             self.assertEqual('Chosen output folder', responses[0]['source'])
 
+    def test_forced_move_runs_again_and_moves_every_powerpoint(self):
+        with tempfile.TemporaryDirectory() as output_dir, \
+                tempfile.TemporaryDirectory() as library_dir:
+            prepared_key = (
+                core._resolved_path(output_dir),
+                core.PREVIOUS_POWERPOINTS_MOVE,
+            )
+            core._PREPARED_OUTPUT_FOLDERS.add(prepared_key)
+            try:
+                old_deck = os.path.join(output_dir, 'Old Song.pptx')
+                with open(old_deck, 'wb') as deck:
+                    deck.write(b'test deck')
+
+                with (
+                    patch.object(core, 'ALL_SONGS_DIR', library_dir),
+                    patch.object(
+                        core, '_presentation_meta',
+                        return_value=('Old Song', 'Artist A'),
+                    ),
+                ):
+                    changed = core.prepare_selected_output_folder(
+                        output_dir,
+                        core.PREVIOUS_POWERPOINTS_MOVE,
+                        preserve_paths=[],
+                        force=True,
+                    )
+
+                self.assertEqual(1, changed)
+                self.assertFalse(os.path.exists(old_deck))
+                self.assertTrue(os.path.exists(
+                    os.path.join(library_dir, 'Old Song.pptx')))
+            finally:
+                core._PREPARED_OUTPUT_FOLDERS.discard(prepared_key)
+
+    def test_prepare_endpoint_applies_move_immediately_without_preserving_rows(self):
+        with tempfile.TemporaryDirectory() as output_dir:
+            responses = []
+            handler = object.__new__(desktop_app.Handler)
+            handler._send_json = lambda payload, status=200: responses.append(payload)
+
+            with patch.object(
+                core, 'prepare_selected_output_folder', return_value=3
+            ) as prepare:
+                handler.handle_prepare_output_folder({
+                    'output_folder': output_dir,
+                    'previous_powerpoints_action': core.PREVIOUS_POWERPOINTS_MOVE,
+                })
+
+            prepare.assert_called_once_with(
+                output_dir,
+                core.PREVIOUS_POWERPOINTS_MOVE,
+                preserve_paths=[],
+                force=True,
+            )
+            self.assertEqual(3, responses[0]['changed_count'])
+            self.assertTrue(responses[0]['ok'])
+
 
 if __name__ == '__main__':
     unittest.main()

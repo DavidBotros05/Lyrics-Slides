@@ -1,61 +1,25 @@
-# Put Lyrics Slides on the internet (free) — use it from your iPhone/iPad
+# Web deployment
 
-After this one-time setup (~15 min on your Mac), the app lives at a web
-address like `https://lyrics-slides.onrender.com`. Open it in Safari at
-church, create the PowerPoint, and it downloads straight to your phone's
-Files app. Your Mac can be off.
+The repository root contains the web version of Lyrics Slides. It serves the browser interface and provides PowerPoint and ZIP downloads.
 
-## Step 1 — Put this repo on GitHub
+## Render
 
-1. Go to https://github.com and sign up (free) if you don't have an account.
-2. Click **+** (top right) → **New repository**. Name it `lyrics-slides`,
-   set it to **Private**, click **Create repository**.
-3. Push this repository to GitHub. The Render cloud service lives at the repo
-   root, and the local desktop app lives in `desktop-version/`.
+Create a Python web service connected to this repository, using the root directory. The included `render.yaml` defines the service configuration:
 
-> Never upload your real `.env` file — the Genius token goes into Render in
-> Step 2 instead. (The `.gitignore` here excludes it anyway.)
+- Build command: `pip install -r requirements.txt`
+- Start command: `python app.py`
+- Port: supplied by the host through `PORT`
 
-## Step 2 — Deploy on Render (free)
+Configure `GENIUS_ACCESS_TOKEN` for Genius API access and optionally `APPLE_MUSIC_DEVELOPER_TOKEN` for complete Apple Music playlist imports. After deployment, open the service URL shown in the hosting dashboard.
 
-1. Go to https://render.com and sign up — choose **Sign up with GitHub**.
-2. Click **New +** → **Web Service**, and pick your `lyrics-slides` repo.
-3. Render reads `render.yaml` and fills everything in. If it asks:
-   - Build command: `pip install -r requirements.txt`
-   - Start command: `python app.py`
-   - Instance type: **Free**
-4. Under **Environment Variables**, add:
-   - Key: `GENIUS_ACCESS_TOKEN`
-   - Value: your token (it's in the `.env` file in the Creation folder
-     on your Mac)
-5. Click **Create Web Service** and wait a few minutes for the first
-   deploy to finish.
-6. Your app is now at the URL shown at the top, e.g.
-   `https://lyrics-slides.onrender.com`.
+## Backgrounds and downloads
 
-## Step 3 — On your iPhone/iPad
+Add bundled backgrounds to `background_images/` to include them in deployments. Runtime uploads and saved preferences require persistent storage to survive replacement of the service filesystem.
 
-1. Open that URL in Safari.
-2. Tap **Share** → **Add to Home Screen** — now it looks and opens like
-   an app.
-3. Create slides as usual; tap the green **Download** button for each
-   song. Files land in **Files app → Downloads**, and from there you can
-   AirDrop, email, or USB them to the church computer.
+Generated presentations are temporary downloads. Save the PowerPoint or ZIP after creating it; download links are not permanent and are lost when the service restarts.
 
-## Things to know
+## Mobile use
 
-- **First load can take ~1 minute.** The free plan puts the app to sleep
-  after 15 minutes of no use; it wakes up on the next visit. Open it
-  while walking into church and it'll be ready.
-- **Background images:** ones you upload through the website disappear
-  whenever the app restarts. To add a background permanently, add the
-  image file to the `background_images` folder in your GitHub repo
-  (GitHub → repo → `background_images` → Add file → Upload). Render
-  redeploys automatically.
-- **Lyrics fetching:** AZLyrics/Genius sometimes block cloud servers. If
-  a fetch fails, use **Preview / edit lyrics** and paste the lyrics in —
-  slide creation itself always works.
-- **The URL is public.** Anyone who has the exact link can use the app,
-  so don't post it anywhere public.
-- The desktop app is included in `desktop-version/` and can be downloaded from
-  the same GitHub repo.
+Open the service URL in a mobile browser, create slides, and save the downloads to the device's file manager. On iOS, the site can also be added to the home screen from Safari's Share menu.
+
+External lyric providers can restrict requests from hosting services. The lyric editor accepts pasted text when automatic fetching is unavailable.

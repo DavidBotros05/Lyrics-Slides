@@ -226,8 +226,12 @@ class Handler(BaseHTTPRequestHandler):
 
         if path == '/api/preview':
             self.handle_preview(data)
+        elif path == '/api/playlist':
+            self.handle_playlist(data)
         elif path == '/api/spotify_playlist':
             self.handle_spotify_playlist(data)
+        elif path == '/api/apple_music_playlist':
+            self.handle_apple_music_playlist(data)
         elif path == '/api/create_one':
             self.handle_create_one(data)
         elif path == '/api/change_backgrounds_upload':
@@ -263,6 +267,40 @@ class Handler(BaseHTTPRequestHandler):
             self._send_json({'ok': False,
                              'error': core.LAST_ERROR or
                                       "Couldn't read that Spotify playlist."})
+            return
+        self._send_json({
+            'ok': True,
+            'name': result['name'],
+            'tracks': result['tracks'],
+            'total': result['total'],
+            'note': result.get('note', ''),
+        })
+
+    def handle_playlist(self, data: dict) -> None:
+        """Detect the playlist service and return its songs."""
+        link = (data.get('link') or '').strip()
+        result = core.fetch_playlist(link)
+        if result is None:
+            self._send_json({'ok': False,
+                             'error': core.LAST_ERROR or
+                                      "Couldn't read that playlist."})
+            return
+        self._send_json({
+            'ok': True,
+            'name': result['name'],
+            'tracks': result['tracks'],
+            'total': result['total'],
+            'note': result.get('note', ''),
+        })
+
+    def handle_apple_music_playlist(self, data: dict) -> None:
+        """Return every song (title + artist) in an Apple Music playlist."""
+        link = (data.get('link') or '').strip()
+        result = core.fetch_apple_music_playlist(link)
+        if result is None:
+            self._send_json({'ok': False,
+                             'error': core.LAST_ERROR or
+                                      "Couldn't read that Apple Music playlist."})
             return
         self._send_json({
             'ok': True,
@@ -437,7 +475,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with _BUILD_LOCK:
                 out_path = core.build_song_presentation(
-                    song, _DOWNLOAD_DIR, background=background,
+                    song, tempfile.mkdtemp(prefix='song_', dir=_DOWNLOAD_DIR),
+                    background=background,
                     selected_backgrounds=selected_backgrounds)
         except Exception as exc:
             self._send_json({'ok': False,

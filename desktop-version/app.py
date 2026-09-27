@@ -266,6 +266,15 @@ class Handler(BaseHTTPRequestHandler):
                     settings.get('last_spotify_playlist', '')
                     if isinstance(settings.get('last_spotify_playlist'), str)
                     else ''),
+                'last_apple_music_playlist': (
+                    settings.get('last_apple_music_playlist', '')
+                    if isinstance(settings.get('last_apple_music_playlist'), str)
+                    else ''),
+                'last_playlist': (
+                    settings.get('last_playlist')
+                    or settings.get('last_apple_music_playlist')
+                    or settings.get('last_spotify_playlist')
+                    or ''),
                 'previous_powerpoints_action': (
                     core.clean_previous_powerpoints_action(
                         settings.get('previous_powerpoints_action'))),
@@ -332,10 +341,16 @@ class Handler(BaseHTTPRequestHandler):
                                  'cancelled': chosen == ''})
         elif path == '/api/preview':
             self.handle_preview(data)
+        elif path == '/api/playlist':
+            self.handle_playlist(data)
         elif path == '/api/spotify_playlist':
             self.handle_spotify_playlist(data)
+        elif path == '/api/apple_music_playlist':
+            self.handle_apple_music_playlist(data)
         elif path == '/api/create_one':
             self.handle_create_one(data)
+        elif path == '/api/prepare_output_folder':
+            self.handle_prepare_output_folder(data)
         elif path == '/api/change_backgrounds':
             self.handle_change_backgrounds(data)
         elif path == '/api/save_settings':
@@ -371,6 +386,46 @@ class Handler(BaseHTTPRequestHandler):
             return
         settings = core.load_app_settings()
         settings['last_spotify_playlist'] = link[:2048]
+        core.save_app_settings(settings)
+        self._send_json({
+            'ok': True,
+            'name': result['name'],
+            'tracks': result['tracks'],
+            'total': result['total'],
+            'note': result.get('note', ''),
+        })
+
+    def handle_playlist(self, data: dict) -> None:
+        """Detect the playlist service, save the link, and return its songs."""
+        link = (data.get('link') or '').strip()
+        result = core.fetch_playlist(link)
+        if result is None:
+            self._send_json({'ok': False,
+                             'error': core.LAST_ERROR or
+                                      "Couldn't read that playlist."})
+            return
+        settings = core.load_app_settings()
+        settings['last_playlist'] = link[:2048]
+        core.save_app_settings(settings)
+        self._send_json({
+            'ok': True,
+            'name': result['name'],
+            'tracks': result['tracks'],
+            'total': result['total'],
+            'note': result.get('note', ''),
+        })
+
+    def handle_apple_music_playlist(self, data: dict) -> None:
+        """Return every song (title + artist) in an Apple Music playlist."""
+        link = (data.get('link') or '').strip()
+        result = core.fetch_apple_music_playlist(link)
+        if result is None:
+            self._send_json({'ok': False,
+                             'error': core.LAST_ERROR or
+                                      "Couldn't read that Apple Music playlist."})
+            return
+        settings = core.load_app_settings()
+        settings['last_apple_music_playlist'] = link[:2048]
         core.save_app_settings(settings)
         self._send_json({
             'ok': True,
@@ -717,6 +772,40 @@ class Handler(BaseHTTPRequestHandler):
                         ('copied' if storage_mode == core.STORAGE_BOTH_COPIES else 'output_only'),
         })
 
+    def handle_prepare_output_folder(self, data: dict) -> None:
+        """Immediately apply the selected previous-PowerPoint action."""
+        output_folder = os.path.expanduser(
+            (data.get('output_folder') or '').strip())
+        if not output_folder:
+            self._send_json({'ok': False,
+                             'error': 'Choose an output folder first.'})
+            return
+        if not os.path.isdir(output_folder):
+            self._send_json({'ok': False,
+                             'error': "That output folder doesn't exist."})
+            return
+
+        action = core.clean_previous_powerpoints_action(
+            data.get('previous_powerpoints_action'))
+        if action == core.PREVIOUS_POWERPOINTS_KEEP:
+            self._send_json({'ok': True, 'changed_count': 0,
+                             'action': action})
+            return
+
+        try:
+            with _BUILD_LOCK:
+                changed = core.prepare_selected_output_folder(
+                    output_folder, action, preserve_paths=[], force=True)
+        except Exception as exc:
+            self._send_json({
+                'ok': False,
+                'error': f"Couldn't prepare the output folder ({short_error(exc)}).",
+            })
+            return
+
+        self._send_json({'ok': True, 'changed_count': changed,
+                         'action': action})
+
     def handle_save_settings(self, data: dict) -> None:
         settings = core.load_app_settings()
         if isinstance(data.get('output_folder'), str) and data['output_folder'].strip():
@@ -727,6 +816,13 @@ class Handler(BaseHTTPRequestHandler):
                 data['last_spotify_playlist'].strip()):
             settings['last_spotify_playlist'] = (
                 data['last_spotify_playlist'].strip()[:2048])
+        if (isinstance(data.get('last_apple_music_playlist'), str) and
+                data['last_apple_music_playlist'].strip()):
+            settings['last_apple_music_playlist'] = (
+                data['last_apple_music_playlist'].strip()[:2048])
+        if (isinstance(data.get('last_playlist'), str) and
+                data['last_playlist'].strip()):
+            settings['last_playlist'] = data['last_playlist'].strip()[:2048]
         if isinstance(data.get('previous_powerpoints_action'), str):
             settings['previous_powerpoints_action'] = (
                 core.clean_previous_powerpoints_action(

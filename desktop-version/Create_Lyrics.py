@@ -264,12 +264,14 @@ def _invalidate_all_songs_index() -> None:
 
 def prepare_selected_output_folder(output_base: str,
                                    previous_action: str | None = None,
-                                   preserve_paths: list[str] | None = None) -> int:
+                                   preserve_paths: list[str] | None = None,
+                                   force: bool = False) -> int:
     """Handle previous-session PowerPoints in the selected output folder.
 
     Keep leaves them alone. Delete removes real files and symlink aliases. Move
     sends real files to All Songs using library versioning, then removes them;
-    aliases are removed because their real deck is already in All Songs.
+    aliases are removed because their real deck is already in All Songs. Force
+    bypasses the once-per-session guard for an explicit Apply now request.
     """
     action = clean_previous_powerpoints_action(previous_action)
     if action == PREVIOUS_POWERPOINTS_KEEP:
@@ -277,7 +279,7 @@ def prepare_selected_output_folder(output_base: str,
 
     output_dir = _resolved_path(output_base)
     prepared_key = (output_dir, action)
-    if prepared_key in _PREPARED_OUTPUT_FOLDERS:
+    if prepared_key in _PREPARED_OUTPUT_FOLDERS and not force:
         return 0
     if _path_is_inside(output_dir, ALL_SONGS_DIR):
         _PREPARED_OUTPUT_FOLDERS.add(prepared_key)
@@ -1182,6 +1184,265 @@ def fetch_spotify_playlist(link: str) -> dict | None:
                 "to import the full playlist.")
     result['note'] = note
     return result
+
+
+# ---------------------------------------------------------------------------
+# Apple Music playlist import
+# ---------------------------------------------------------------------------
+
+APPLE_MUSIC_DEVELOPER_TOKEN = os.environ.get('APPLE_MUSIC_DEVELOPER_TOKEN', '')
+
+
+def _apple_music_parse_playlist_link(text: str) -> tuple[str, str]:
+    """Return (storefront, playlist id) from a public Apple Music link."""
+    match = re.search(
+        r'https?://(?:music|itunes)\.apple\.com/([a-z]{2})/playlist/'
+        r'[^?#]+/(pl\.[A-Za-z0-9-]+)(?:[?#/]|$)',
+        (text or '').strip(), re.I)
+    if not match:
+        return '', ''
+    return match.group(1).lower(), match.group(2)
+
+
+def _apple_music_artist(value) -> str:
+    if isinstance(value, dict):
+        direct = (value.get('artistName') or value.get('name')
+                  or value.get('title') or value.get('text'))
+        if isinstance(direct, str) and direct.strip():
+            return direct.strip()
+        for key in ('attributes', 'data', 'items', 'artists', 'byArtist',
+                    'artist', 'performer'):
+            artist = _apple_music_artist(value.get(key))
+            if artist:
+                return artist
+        return ''
+    if isinstance(value, list):
+        return ', '.join(filter(None, (_apple_music_artist(item) for item in value)))
+    return str(value or '').strip()
+
+
+def _apple_music_track(item) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    item = item.get('item', item)
+    if not isinstance(item, dict):
+        return None
+    attributes = item.get('attributes') if isinstance(item.get('attributes'), dict) else {}
+    title = (item.get('name') or item.get('title') or attributes.get('name') or '').strip()
+    relationships = (item.get('relationships')
+                     if isinstance(item.get('relationships'), dict) else {})
+    artist = _apple_music_artist(
+        item.get('byArtist') or item.get('artist') or item.get('author')
+        or item.get('artists') or item.get('performer')
+        or attributes.get('artistName') or attributes.get('artistNames')
+        or attributes.get('artist') or item.get('artistName')
+        or item.get('songArtistName') or item.get('subtitle')
+        or relationships.get('artists') or relationships.get('artist')
+        or relationships.get('performers'))
+    return {'title': title, 'artist': artist} if title else None
+
+
+def _apple_music_jsonld_playlists(data) -> list[dict]:
+    found = []
+    if isinstance(data, dict):
+        types = data.get('@type')
+        if types == 'MusicPlaylist' or (isinstance(types, list) and 'MusicPlaylist' in types):
+            found.append(data)
+        for value in data.values():
+            found.extend(_apple_music_jsonld_playlists(value))
+    elif isinstance(data, list):
+        for value in data:
+            found.extend(_apple_music_jsonld_playlists(value))
+    return found
+
+
+def _apple_music_serialized_tracks(data) -> list[dict]:
+    tracks = []
+    if isinstance(data, dict):
+        track = _apple_music_track(data)
+        if track and track['artist']:
+            tracks.append(track)
+        for value in data.values():
+            tracks.extend(_apple_music_serialized_tracks(value))
+    elif isinstance(data, list):
+        for value in data:
+            tracks.extend(_apple_music_serialized_tracks(value))
+    return tracks
+
+
+def _dedupe_playlist_tracks(tracks: list[dict]) -> list[dict]:
+    unique, seen = [], set()
+    for track in tracks:
+        key = (track['title'].casefold(), track['artist'].casefold())
+        if key not in seen:
+            seen.add(key)
+            unique.append(track)
+    return unique
+
+
+def _apple_music_page_artists(data) -> dict:
+    """Index artist credits from Apple's song records by stable catalog ID."""
+    artists = {}
+    if isinstance(data, dict):
+        descriptor = data.get('contentDescriptor') or {}
+        if descriptor.get('kind') == 'song':
+            song_id = (descriptor.get('identifiers') or {}).get('storeAdamID')
+            artist = _apple_music_artist(
+                data.get('artistName') or data.get('subtitleLinks'))
+            if song_id and artist:
+                artists[str(song_id)] = artist
+        for value in data.values():
+            artists.update(_apple_music_page_artists(value))
+    elif isinstance(data, list):
+        for value in data:
+            artists.update(_apple_music_page_artists(value))
+    return artists
+
+
+def _apple_music_from_page(link: str) -> dict | None:
+    """Read a public Apple Music playlist page without a login or API token."""
+    _require_scraper_packages()
+    resp = requests.get(link, headers=BROWSER_HEADERS, timeout=20)
+    resp.raise_for_status()
+
+    json_documents = []
+    for script in re.findall(
+            r'<script[^>]+type=["\']application/(?:ld\+json|json)["\'][^>]*>(.*?)</script>',
+            resp.text, re.S | re.I):
+        try:
+            json_documents.append(json.loads(script))
+        except json.JSONDecodeError:
+            continue
+
+    page_artists = _apple_music_page_artists(json_documents)
+    for data in json_documents:
+        for playlist in _apple_music_jsonld_playlists(data):
+            raw_tracks = playlist.get('track') or playlist.get('itemListElement') or []
+            if not isinstance(raw_tracks, list):
+                raw_tracks = [raw_tracks]
+            tracks = []
+            for item in raw_tracks:
+                track = _apple_music_track(item)
+                if not track:
+                    continue
+                record = item.get('item', item)
+                song_url = record.get('url') or ''
+                song_id = re.search(r'(?:/|[?&]i=)(\d+)(?:[?&#/]|$)', song_url)
+                if not track['artist'] and song_id:
+                    track['artist'] = page_artists.get(song_id.group(1), '')
+                tracks.append(track)
+            if tracks:
+                total = playlist.get('numTracks') or playlist.get('numberOfItems') or len(tracks)
+                try:
+                    total = int(total)
+                except (TypeError, ValueError):
+                    total = len(tracks)
+                return {'name': (playlist.get('name') or 'Apple Music playlist').strip(),
+                        'tracks': tracks, 'total': total, 'method': 'json-ld'}
+
+    tracks = _dedupe_playlist_tracks([
+        track for data in json_documents
+        for track in _apple_music_serialized_tracks(data)
+    ])
+    if tracks:
+        title_match = re.search(
+            r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\'](.*?)["\']',
+            resp.text, re.I)
+        name = title_match.group(1).strip() if title_match else 'Apple Music playlist'
+        return {'name': name, 'tracks': tracks, 'total': len(tracks), 'method': 'serialized'}
+    return None
+
+
+def _apple_music_from_api(storefront: str, playlist_id: str) -> dict | None:
+    """Read every playlist track through the Apple Music API."""
+    headers = {'Authorization': f'Bearer {APPLE_MUSIC_DEVELOPER_TOKEN}'}
+    base = f'https://api.music.apple.com/v1/catalog/{storefront}/playlists/{playlist_id}'
+    response = requests.get(base, headers=headers, timeout=20)
+    response.raise_for_status()
+    playlist_data = response.json().get('data') or []
+    playlist = playlist_data[0] if playlist_data else {}
+    name = (playlist.get('attributes', {}).get('name') or 'Apple Music playlist').strip()
+
+    tracks, url, params = [], f'{base}/tracks', {'limit': 100}
+    while url:
+        response = requests.get(url, params=params, headers=headers, timeout=20)
+        response.raise_for_status()
+        page = response.json()
+        for item in page.get('data') or []:
+            track = _apple_music_track(item)
+            if track:
+                tracks.append(track)
+        url = page.get('next')
+        if url and url.startswith('/'):
+            url = f'https://api.music.apple.com{url}'
+        params = None
+
+    if not tracks:
+        return None
+    return {'name': name, 'tracks': _dedupe_playlist_tracks(tracks),
+            'total': len(tracks), 'method': 'api'}
+
+
+def fetch_apple_music_playlist(link: str) -> dict | None:
+    """Fetch songs from a shared, public Apple Music playlist link."""
+    global LAST_ERROR
+    LAST_ERROR = ''
+
+    storefront, playlist_id = _apple_music_parse_playlist_link(link)
+    if not playlist_id:
+        LAST_ERROR = ("That doesn't look like an Apple Music playlist link. Paste "
+                      "one like https://music.apple.com/.../playlist/.../pl....")
+        return None
+    if requests is None:
+        LAST_ERROR = "The 'requests' package isn't installed."
+        return None
+
+    result = None
+    if APPLE_MUSIC_DEVELOPER_TOKEN:
+        try:
+            result = _apple_music_from_api(storefront, playlist_id)
+        except Exception as exc:
+            LAST_ERROR = f"Apple Music API lookup failed ({_short_err(exc)})."
+    if result is None:
+        try:
+            result = _apple_music_from_page(link)
+        except Exception as exc:
+            LAST_ERROR = (LAST_ERROR or
+                          f"Couldn't load that Apple Music playlist ({_short_err(exc)}).")
+            return None
+    if not result or not result['tracks']:
+        LAST_ERROR = "No tracks found - is the Apple Music playlist public?"
+        return None
+
+    note = ''
+    if result['total'] > len(result['tracks']):
+        note = (f"Only {len(result['tracks'])} of {result['total']} tracks were "
+                "available on the public Apple Music page. Add an "
+                "APPLE_MUSIC_DEVELOPER_TOKEN to import the full playlist.")
+    result['note'] = note
+    return result
+
+
+def detect_playlist_service(link: str) -> str:
+    """Return the supported service represented by a playlist link."""
+    if _spotify_parse_link(link)[1]:
+        return 'spotify'
+    if _apple_music_parse_playlist_link(link)[1]:
+        return 'apple_music'
+    return ''
+
+
+def fetch_playlist(link: str) -> dict | None:
+    """Detect Spotify or Apple Music and fetch its public playlist."""
+    global LAST_ERROR
+    service = detect_playlist_service(link)
+    if service == 'spotify':
+        return fetch_spotify_playlist(link)
+    if service == 'apple_music':
+        return fetch_apple_music_playlist(link)
+    LAST_ERROR = ('Paste a Spotify or Apple Music playlist link. The app will '
+                  'detect the service automatically.')
+    return None
 
 
 def fetch_from_genius(artist: str = '', title: str = '', url: str = '') -> dict | None:
